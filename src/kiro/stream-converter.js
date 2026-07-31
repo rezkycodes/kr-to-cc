@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { normalizeToolInput } from './request-builder.js';
+import { normalizeToolInput, restoreAnthropicToolName } from './request-builder.js';
 
 function completeToolInputJson(input) {
     return JSON.stringify(normalizeToolInput(input));
@@ -7,9 +7,10 @@ function completeToolInputJson(input) {
 
 /** Stateful converter from Kiro event payloads to Anthropic Messages SSE. */
 export class AnthropicStreamState {
-    constructor(requestModel, messageId) {
+    constructor(requestModel, messageId, toolNameMap) {
         this.requestModel = requestModel;
         this.messageId = messageId || `msg_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
+        this.toolNameMap = toolNameMap;
         this.started = false;
         this.openBlock = null;
         this.toolBlocks = new Map();
@@ -108,7 +109,11 @@ export class AnthropicStreamState {
         const id = toolUse.toolUseId
             || `toolu_${crypto.randomUUID().replace(/-/g, '').slice(0, 24)}`;
         const index = this.nextBlockIndex++;
-        const tool = { id, index, name: toolUse.name || '' };
+        const tool = {
+            id,
+            index,
+            name: restoreAnthropicToolName(toolUse.name || '', this.toolNameMap)
+        };
         this.toolBlocks.set(id, tool);
         this.sawToolUse = true;
         events.push({

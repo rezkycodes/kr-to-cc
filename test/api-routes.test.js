@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
     normalizeModelCheckOptions,
+    parseError,
     validateMessagesRequest
 } from '../src/routes/api.routes.js';
 
@@ -54,4 +55,16 @@ test('bounds model check concurrency, timeout, and candidate count', () => {
     assert.throws(() => normalizeModelCheckOptions({
         models: Array.from({ length: 51 }, (_, index) => `model-${index}`)
     }), /at most 50/);
+});
+
+test('maps Kiro request validation failures to Anthropic 400 errors', () => {
+    const error = Object.assign(new Error(
+        'Kiro API error 400: {"message":"Invalid tool use format.","reason":"REQUEST_BODY_INVALID"}'
+    ), { statusCode: 400 });
+
+    assert.deepEqual(parseError(error), {
+        errorType: 'invalid_request_error',
+        statusCode: 400,
+        errorMessage: 'Invalid tool use format.'
+    });
 });

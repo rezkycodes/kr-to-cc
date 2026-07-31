@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { AnthropicStreamState } from '../src/kiro/stream-converter.js';
+import { buildKiroToolNameMap, toKiroToolName } from '../src/kiro/request-builder.js';
 
 function eventTypes(events) {
     return events.map((event) => event.type);
@@ -107,4 +108,20 @@ test('streams fragmented top-level Kiro tool events as one Anthropic block', () 
     assert.equal(deltas.map((event) => event.delta.partial_json).join(''), '{"value":"OK"}');
     assert.equal(stops.length, 1);
     assert.equal(events.at(-2).delta.stop_reason, 'tool_use');
+});
+
+test('restores an aliased Kiro tool name in streaming output', () => {
+    const longName = 'mcp__plugin_chrome-devtools-mcp_chrome-devtools__performance_analyze_insight';
+    const lookup = buildKiroToolNameMap([{ name: longName }]);
+    const state = new AnthropicStreamState('claude-opus-4-8', 'msg_test', lookup);
+
+    const events = state.push({
+        toolUseId: 'toolu_long_1',
+        name: toKiroToolName(longName),
+        input: '{}',
+        stop: true
+    });
+    const start = events.find((event) => event.type === 'content_block_start');
+
+    assert.equal(start.content_block.name, longName);
 });

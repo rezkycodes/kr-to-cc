@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildKiroRequest } from '../src/kiro/request-builder.js';
+import {
+    buildKiroRequest,
+    buildKiroToolNameMap,
+    restoreAnthropicToolName,
+    toKiroToolName
+} from '../src/kiro/request-builder.js';
 
 const tools = [
     {
@@ -169,4 +174,53 @@ test('preserves the system prompt for an assistant-only request', () => {
         request.conversationState.currentMessage.userInputMessage.content,
         'system instruction\n\nprefill'
     );
+});
+
+test('aliases overlong tool names consistently for Kiro and restores Anthropic names', () => {
+    const longName = 'mcp__plugin_chrome-devtools-mcp_chrome-devtools__performance_analyze_insight';
+    const anotherLongName = `${longName}_secondary`;
+    const alias = toKiroToolName(longName);
+
+    assert.ok(longName.length > 64);
+    assert.ok(alias.length <= 64);
+    assert.match(alias, /^[A-Za-z0-9_-]+$/);
+    assert.notEqual(alias, longName);
+    assert.equal(toKiroToolName(longName), alias);
+    assert.notEqual(toKiroToolName(anotherLongName), alias);
+
+    const lookup = buildKiroToolNameMap([{ name: longName }, { name: anotherLongName }]);
+    assert.equal(restoreAnthropicToolName(alias, lookup), longName);
+    assert.equal(restoreAnthropicToolName('Read', lookup), 'Read');
+});
+
+test('uses the same Kiro-safe alias in tool definitions and assistant history', () => {
+    const longName = 'mcp__plugin_chrome-devtools-mcp_chrome-devtools__performance_analyze_insight';
+    const request = buildKiroRequest({
+        model: 'claude-opus-4-8',
+        tools: [{
+            name: longName,
+            description: 'Analyze a performance insight',
+            input_schema: { type: 'object', properties: {} }
+        }],
+        messages: [
+            { role: 'user', content: 'Analyze the trace' },
+            {
+                role: 'assistant',
+                content: [{ type: 'tool_use', id: 'toolu_long_1', name: longName, input: {} }]
+            },
+            {
+                role: 'user',
+                content: [{ type: 'tool_result', tool_use_id: 'toolu_long_1', content: 'done' }]
+            }
+        ]
+    });
+
+    const definitionName = request.conversationState.currentMessage.userInputMessage
+        .userInputMessageContext.tools[0].toolSpecification.name;
+    const historyName = request.conversationState.history[1]
+        .assistantResponseMessage.toolUses[0].name;
+
+    assert.equal(definitionName, toKiroToolName(longName));
+    assert.equal(historyName, definitionName);
+    assert.ok(definitionName.length <= 64);
 });

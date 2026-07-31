@@ -123,7 +123,11 @@ export function parseError(error) {
         } else {
             errorMessage = `You have exhausted your capacity on ${model}. Please wait for your quota to reset.`;
         }
-    } else if (error.message.includes('invalid_request_error') || error.message.includes('INVALID_ARGUMENT')) {
+    } else if (error.statusCode === 400
+        || error.message.includes('Kiro API error 400')
+        || error.message.includes('REQUEST_BODY_INVALID')
+        || error.message.includes('invalid_request_error')
+        || error.message.includes('INVALID_ARGUMENT')) {
         errorType = 'invalid_request_error';
         statusCode = 400;
         const msgMatch = error.message.match(/"message":"([^"]+)"/);

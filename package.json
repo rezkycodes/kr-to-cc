@@ -37,11 +37,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rezkycodes/kiro-to-claude.git"
+    "url": "git+https://github.com/rezkycodes/kr-to-cc.git"
   },
-  "homepage": "https://github.com/rezkycodes/kiro-to-claude#readme",
+  "homepage": "https://github.com/rezkycodes/kr-to-cc#readme",
   "bugs": {
-    "url": "https://github.com/rezkycodes/kiro-to-claude/issues"
+    "url": "https://github.com/rezkycodes/kr-to-cc/issues"
   },
   "engines": {
     "node": ">=18.0.0"

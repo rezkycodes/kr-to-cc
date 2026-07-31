@@ -54,8 +54,8 @@ kiro-to-claude start
 ### Option 2: Clone Repository
 
 ```bash
-git clone https://github.com/rezkycodes/kiro-to-claude.git
-cd kiro-to-claude
+git clone https://github.com/rezkycodes/kr-to-cc.git
+cd kr-to-cc
 npm install
 npm start
 ```

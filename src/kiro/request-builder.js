@@ -10,6 +10,42 @@ import {
     KIRO_HEADERS
 } from '../constants.js';
 
+export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
+const KIRO_TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+const TOOL_NAME_HASH_LENGTH = 16;
+
+/** Convert an Anthropic/MCP tool name to Kiro's <=64 character format. */
+export function toKiroToolName(name) {
+    const original = String(name || '');
+    if (original.length <= KIRO_TOOL_NAME_MAX_LENGTH
+        && KIRO_TOOL_NAME_PATTERN.test(original)) {
+        return original;
+    }
+
+    const safeStem = original.replace(/[^A-Za-z0-9_-]/g, '_') || 'tool';
+    const digest = crypto.createHash('sha256')
+        .update(original)
+        .digest('hex')
+        .slice(0, TOOL_NAME_HASH_LENGTH);
+    const suffix = `_${digest}`;
+    return `${safeStem.slice(0, KIRO_TOOL_NAME_MAX_LENGTH - suffix.length)}${suffix}`;
+}
+
+/** Map the Kiro-safe names in a response back to names understood by the client. */
+export function buildKiroToolNameMap(tools) {
+    const names = new Map();
+    for (const tool of Array.isArray(tools) ? tools : []) {
+        if (tool && typeof tool.name === 'string' && tool.name) {
+            names.set(toKiroToolName(tool.name), tool.name);
+        }
+    }
+    return names;
+}
+
+export function restoreAnthropicToolName(name, toolNameMap) {
+    return toolNameMap?.get(name) || name;
+}
+
 /** Map an Anthropic model name to Kiro's internal model ID. */
 export function mapModelToKiro(anthropicModel) {
     const lower = (anthropicModel || '').toLowerCase();
@@ -110,7 +146,7 @@ function normalizeMessage(message) {
         } else if (block.type === 'tool_use' && role === 'assistant') {
             toolUses.push({
                 toolUseId: block.id,
-                name: block.name,
+                name: toKiroToolName(block.name),
                 input: normalizeToolInput(block.input)
             });
         } else if (block.type === 'tool_result' && role === 'user') {
@@ -133,7 +169,7 @@ export function buildKiroTools(tools, toolChoice) {
         .filter((tool) => tool && typeof tool.name === 'string' && tool.name.length > 0)
         .map((tool) => ({
             toolSpecification: {
-                name: tool.name,
+                name: toKiroToolName(tool.name),
                 description: typeof tool.description === 'string' ? tool.description : '',
                 inputSchema: {
                     json: tool.input_schema && typeof tool.input_schema === 'object'

@@ -10,7 +10,12 @@ import {
     getKiroEndpoint
 } from '../constants.js';
 import { getKiroAuthData } from '../auth/kiro-token-extractor.js';
-import { buildKiroRequest, buildKiroHeaders, mapModelToKiro } from './request-builder.js';
+import {
+    buildKiroRequest,
+    buildKiroHeaders,
+    buildKiroToolNameMap,
+    mapModelToKiro
+} from './request-builder.js';
 import { parseEventStreamAsync } from './aws-event-stream.js';
 import { AnthropicStreamState } from './stream-converter.js';
 import { logger } from '../utils/logger.js';
@@ -29,6 +34,7 @@ export async function* sendKiroMessageStream(anthropicRequest) {
         throw new Error('No Kiro authentication token available. Please log in to Kiro CLI first.');
     }
 
+    const toolNameMap = buildKiroToolNameMap(anthropicRequest.tools);
     const payload = buildKiroRequest(anthropicRequest, { profileArn: authData.profileArn });
     const headers = {
         ...buildKiroHeaders(token, region, true),
@@ -67,10 +73,12 @@ export async function* sendKiroMessageStream(anthropicRequest) {
                     await sleep(waitMs);
                     continue;
                 }
-                throw new Error(`Kiro API error ${response.status}: ${errorText}`);
+                const upstreamError = new Error(`Kiro API error ${response.status}: ${errorText}`);
+                upstreamError.statusCode = response.status;
+                throw upstreamError;
             }
 
-            yield* streamKiroResponse(response, model);
+            yield* streamKiroResponse(response, model, toolNameMap);
             return;
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -78,6 +86,7 @@ export async function* sendKiroMessageStream(anthropicRequest) {
                 throw new Error(`Kiro stream timed out after ${UPSTREAM_TIMEOUT_MS}ms.`);
             }
             if (error.message.includes('authentication') || error.message.includes('expired')) throw error;
+            if (Number.isInteger(error.statusCode) && error.statusCode < 500) throw error;
             if (attempt === MAX_RETRIES - 1) throw error;
             logger.warn(`[Kiro] Stream attempt ${attempt + 1} failed: ${error.message}`);
             await sleep(2 ** attempt * 1000);
@@ -90,9 +99,9 @@ export async function* sendKiroMessageStream(anthropicRequest) {
 }
 
 /** Parse AWS event stream frames and convert each event incrementally. */
-export async function* streamKiroResponse(response, requestModel) {
+export async function* streamKiroResponse(response, requestModel, toolNameMap) {
     if (!response.body) throw new Error('Kiro streaming response had no body.');
-    const state = new AnthropicStreamState(requestModel);
+    const state = new AnthropicStreamState(requestModel, undefined, toolNameMap);
 
     for await (const event of parseEventStreamAsync(response.body)) {
         for (const anthropicEvent of state.push(event)) yield anthropicEvent;

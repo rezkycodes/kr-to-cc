@@ -172,6 +172,16 @@ claude
 | `/health` | GET | Health check |
 | `/v1/messages` | POST | Anthropic Messages API |
 | `/v1/models` | GET | List available models |
+| `/ui/telemetry/data` | GET | Telemetry snapshot as JSON |
+| `/ui/telemetry/stream` | GET | Server-Sent Events telemetry stream |
+
+### Web UIs
+
+| URL | Description |
+|-----|-------------|
+| `/` or `/dashboard` | Monitor — realtime traffic trace, metrics, per-model and failure breakdowns |
+| `/oauth/kiro` | Sign in — Google/GitHub, auto-import, or paste a refresh token |
+| `/config/claude` | Configure — Claude Code env values with a live JSON preview, plus the model catalog |
 
 ---
 

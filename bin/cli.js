@@ -76,7 +76,7 @@ async function main() {
     case 'start':
     case undefined:
       // Default to starting the server
-      await import('../src/index.js');
+      await import('../apps/server/src/index.js');
       break;
 
     case 'help':

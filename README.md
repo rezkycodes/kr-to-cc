@@ -26,11 +26,12 @@ A proxy server that exposes an **Anthropic-compatible API** backed by **Kiro's A
 - **Automatic token refresh** — stays signed in until you log out; no repeated `kiro auth`
 - **Browser sign-in UI** (`/oauth/kiro`) — Google/GitHub login, auto-import from Kiro IDE / CLI, or manual token import
 - **Claude Code config UI** (`/config/claude`) — write `~/.claude/settings.json` with a click
+- **Realtime monitor** (`/dashboard`) — live traffic trace over SSE, plus per-model and failure breakdowns
 - **Live model checker** (`/v1/models/check`) — probe which models are actually active
 
 ## Prerequisites
 
-- **Node.js** 18 or later
+- **Node.js 20.19 or later**
 - A Kiro account. Sign in one of these ways:
   - the built-in UI at `/oauth/kiro` (Google/GitHub, or import from Kiro IDE/CLI), **or**
   - the **Kiro CLI** (`kiro auth`), **or**
@@ -241,13 +242,38 @@ claude
 | `/v1/models` | GET | List available models |
 | `/v1/models/check` | GET/POST | Probe which models are actually active (1 tiny request/model) |
 | `/v1/messages/count_tokens` | POST | Heuristic token count estimate |
+| `/ui/telemetry/data` | GET | Telemetry snapshot as JSON |
+| `/ui/telemetry/stream` | GET | Server-Sent Events telemetry stream (see below) |
 
 ### Web UIs
 
+Three pages, each with its own layout:
+
 | URL | Description |
 |-----|-------------|
-| `/oauth/kiro` | Sign in (Google/GitHub), auto-import from Kiro IDE/CLI, or paste a token |
-| `/config/claude` | Configure Claude Code (`~/.claude/settings.json`) |
+| `/` or `/dashboard` | **Monitor** — realtime traffic trace, aggregate metrics, per-model and failure breakdowns |
+| `/oauth/kiro` | **Sign in** — Google/GitHub, auto-import from Kiro IDE/CLI, or paste a refresh token |
+| `/config/claude` | **Configure** — edit Claude Code env values with a live JSON preview, plus the model catalog and availability probe |
+
+### Telemetry stream (`GET /ui/telemetry/stream`)
+
+The Monitor page draws its live trace from an SSE stream instead of polling.
+
+| Query param | Default | Description |
+|-------------|---------|-------------|
+| `window` | `15` | Aggregate window in minutes |
+| `live` | `90` | Seconds of per-second buckets to keep (max `600`) |
+
+Frames:
+
+- `init` — snapshot, live backlog, and `tick_interval_ms`, sent immediately on connect
+- `tick` — current second (`ok`/`fail`/`hold`/`p95`) plus `in_flight`, at 1 Hz
+- `snapshot` — full aggregates every 5 s, and coalesced within ~400 ms of any change
+- `: keep-alive` comment every 20 s
+
+At most 8 concurrent stream clients are accepted; further connections get `503`.
+Telemetry lives in memory only — no request or response bodies are recorded, and
+everything is discarded when the process exits.
 
 ---
 
@@ -296,6 +322,29 @@ kiro auth
 
 ## Development
 
+
+### Nx workspace commands
+
+The backend lives in `apps/server/src/` and the Vue 3 + Vite dashboard lives in `apps/web/`.
+Nx coordinates both projects and caches build, test, and typecheck work.
+
+```bash
+# Start Express on :4000 and Vite on :3210 with API proxying
+npm run dev
+
+# Production frontend build (dist/apps/web)
+npm run build
+
+# Build, Node tests, and Vue/Vitest tests
+npm test
+
+# Vue TypeScript validation
+npm run typecheck
+```
+
+The production Express server serves the built Vue app at `/`, `/dashboard`,
+`/oauth/kiro`, and `/config/claude`. When the frontend build is absent, the
+legacy server-rendered pages remain available as a development fallback.
 ### Running in Debug Mode
 
 ```bash

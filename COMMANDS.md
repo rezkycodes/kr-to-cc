@@ -80,15 +80,29 @@ curl -X POST http://localhost:4000/v1/messages \
   }'
 ```
 
+### Telemetry
+```bash
+GET /ui/telemetry/data                      # JSON snapshot
+curl "http://localhost:4000/ui/telemetry/data?window=15"
+
+GET /ui/telemetry/stream                    # Server-Sent Events (init/tick/snapshot)
+curl -N "http://localhost:4000/ui/telemetry/stream?window=15&live=90"
+```
+`window` is the aggregate window in minutes (default `15`); `live` is how many
+seconds of per-second buckets to keep (default `90`, max `600`). At most 8
+concurrent stream clients are accepted. Telemetry is in-memory only.
+
 ---
 
 ## Web UIs
 
 Open in a browser:
 
-- `http://localhost:4000/`             — Dashboard (status, models, checker)
-- `http://localhost:4000/oauth/kiro`   — Sign in (Google/GitHub, auto-import, or paste token)
-- `http://localhost:4000/config/claude` — Configure Claude Code (`~/.claude/settings.json`)
+- `http://localhost:4000/dashboard`      — Monitor (realtime traffic trace, metrics, failures)
+- `http://localhost:4000/oauth/kiro`     — Sign in (Google/GitHub, auto-import, or paste token)
+- `http://localhost:4000/config/claude`  — Configure Claude Code (`~/.claude/settings.json`) + model catalog
+
+`/` redirects to `/dashboard`.
 
 ---
 

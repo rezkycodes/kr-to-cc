@@ -29,3 +29,11 @@ tests/utils/*.jpeg
 # Build output
 dist/
 build/
+
+
+
+.nx/cache
+.nx/workspace-data
+.nx/migrate-runs
+vitest.config.*.timestamp*
+vite.config.*.timestamp*

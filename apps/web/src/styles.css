@@ -1,0 +1,189 @@
+/*
+ * Kiro → Claude control plane — design tokens.
+ *
+ * Direction: an instrument panel, not a marketing page. The surface is graphite
+ * and achromatic; saturated colour is reserved exclusively for telemetry, so a
+ * hue on screen always means data. Severity reads cool → warm.
+ *
+ * Fonts are vendored (apps/server/src/ui/assets/geist) rather than fetched from
+ * a CDN: the dashboard is served under a strict `font-src 'self'` policy and has
+ * to render with no network egress.
+ */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('/geist/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/geist/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --font-heading: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Telemetry ramp. Never used for chrome. */
+  --color-signal-ok: var(--signal-ok);
+  --color-signal-hold: var(--signal-hold);
+  --color-signal-fail: var(--signal-fail);
+  --color-chart-1: var(--signal-ok);
+  --color-chart-2: var(--signal-hold);
+  --color-chart-3: var(--signal-fail);
+
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root,
+.dark {
+  --radius: 0.5rem;
+
+  --background: #08080a;
+  --foreground: #f4f4f5;
+  --card: #0e0e11;
+  --card-foreground: #f4f4f5;
+  --popover: #101014;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #0a0a0c;
+  --secondary: #17171b;
+  --secondary-foreground: #e4e4e7;
+  --muted: #141418;
+  --muted-foreground: #8b8b95;
+  --accent: #1b1b20;
+  --accent-foreground: #f4f4f5;
+  --destructive: #fb7185;
+  --border: #1e1e23;
+  --input: #26262c;
+  --ring: #52525b;
+
+  --signal-ok: #7dd3fc;
+  --signal-hold: #fcd34d;
+  --signal-fail: #fb7185;
+
+  --sidebar: #0e0e11;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-primary: #f4f4f5;
+  --sidebar-primary-foreground: #0a0a0c;
+  --sidebar-accent: #1b1b20;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #1e1e23;
+  --sidebar-ring: #52525b;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/60;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Every number here is data: keep columns from twitching as values change. */
+  code,
+  kbd,
+  samp,
+  pre,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  a[href] {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+}
+
+@layer components {
+  /* Small uppercase mono label used for every field and section eyebrow. */
+  .label-micro {
+    @apply font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground;
+  }
+
+  /* Hairline cells instead of nested cards — keeps the panel dense and flat. */
+  .hairline-grid {
+    @apply grid gap-px bg-border;
+  }
+
+  .hairline-grid > * {
+    @apply bg-card;
+  }
+
+  /*
+   * Horizontal-only scroll regions (the section nav) must not show chrome:
+   * a scrollbar inside a 56px bar is louder than the content it scrolls.
+   * Scrolling stays available via wheel, drag, and focus.
+   */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The live trace is the one animated element; honour the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

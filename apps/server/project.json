@@ -1,0 +1,13 @@
+{
+  "name": "server",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/server/src",
+  "targets": {
+    "serve": { "executor": "nx:run-commands", "continuous": true, "options": { "cwd": ".", "command": "node apps/server/src/index.js" } },
+    "dev": { "executor": "nx:run-commands", "continuous": true, "options": { "cwd": ".", "command": "PORT=4000 HOST=127.0.0.1 node --watch apps/server/src/index.js" } },
+    "test": { "executor": "nx:run-commands", "cache": true, "inputs": ["default", "^default"], "options": { "cwd": ".", "command": "node --test apps/server/test/*.test.js" } },
+    "check": { "executor": "nx:run-commands", "cache": true, "inputs": ["default", "^default"], "options": { "cwd": ".", "command": "find apps/server/src apps/server/test bin -type f -name '*.js' -print0 | xargs -0 -n1 node --check" } }
+  },
+  "tags": ["type:backend"]
+}

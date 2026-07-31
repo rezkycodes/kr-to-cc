@@ -75,7 +75,7 @@ function dashboardBody() {
   <div class="section">
     <h2>Models</h2>
     <div class="stack">
-      ${expCard('modelsCard', '/ui/models', ICONS.cube, 'Available models', 'Browse the full model catalog (15 models incl. Opus 4.8/4.7, Sonnet 5, and open-weight) as pretty JSON.', 'View JSON')}
+      ${expCard('modelsCard', '/ui/models', ICONS.cube, 'Available models', 'Browse the full model catalog (16 models incl. Opus 5/4.8, Sonnet 5, and open-weight) as pretty JSON.', 'View JSON')}
       ${expCard('checkCard', '/ui/models-check', ICONS.pulse, 'Check active models', 'Probe models on demand — check one at a time or all at once. Nothing runs until you click, so you only spend quota when you want to.', 'Open checker')}
     </div>
   </div>

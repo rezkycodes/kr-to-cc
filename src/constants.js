@@ -61,10 +61,14 @@ function getKiroDbPath() {
 }
 
 // Basic configuration
-export const REQUEST_BODY_LIMIT = '50mb';
+export const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '10mb';
 export const DEFAULT_PORT = 4000;
 export const TOKEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export const MAX_RETRIES = 3; // Max retry attempts
+export const UPSTREAM_TIMEOUT_MS = Math.max(
+    1000,
+    Number.parseInt(process.env.UPSTREAM_TIMEOUT_MS || '300000', 10) || 300000
+);
 
 // Refresh the access token this many ms before it actually expires.
 export const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // 5 minutes
@@ -131,8 +135,16 @@ export const KIRO_ENDPOINTS = {
     'us-east-1': 'https://codewhisperer.us-east-1.amazonaws.com',
     'us-west-2': 'https://codewhisperer.us-west-2.amazonaws.com',
     'eu-west-1': 'https://codewhisperer.eu-west-1.amazonaws.com',
+    'eu-central-1': 'https://codewhisperer.eu-central-1.amazonaws.com',
     'ap-northeast-1': 'https://codewhisperer.ap-northeast-1.amazonaws.com'
 };
+
+/** Resolve a validated regional CodeWhisperer endpoint without silent fallback. */
+export function getKiroEndpoint(region = 'us-east-1') {
+    const validRegion = assertValidAwsRegion(region);
+    return KIRO_ENDPOINTS[validRegion]
+        || KIRO_ENDPOINT_TEMPLATE.replace('{region}', validRegion);
+}
 
 // Kiro API paths
 export const KIRO_API_PATHS = {
@@ -149,6 +161,8 @@ export const KIRO_DEFAULT_REGION = 'us-east-1';
 // Kiro model mappings (Claude model names to Kiro's internal model IDs)
 export const KIRO_MODEL_MAPPING = {
     // --- Anthropic Claude (map Anthropic-style aliases to Kiro internal IDs) ---
+    'claude-opus-5': 'claude-opus-5',
+    'claude-opus-5-thinking': 'claude-opus-5',
     'claude-opus-4-8': 'claude-opus-4.8',
     'claude-opus-4-8-thinking': 'claude-opus-4.8',
     'claude-opus-4-7': 'claude-opus-4.7',

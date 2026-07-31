@@ -31,3 +31,26 @@ export function formatDuration(ms) {
 export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+/**
+ * Combine an optional parent signal with a timeout in a Node 18 compatible way.
+ * Call cleanup once the operation completes to release timers/listeners.
+ */
+export function createAbortContext(parentSignal, timeoutMs) {
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort();
+
+    if (parentSignal?.aborted) controller.abort();
+    else parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    timeout.unref?.();
+
+    return {
+        signal: controller.signal,
+        cleanup() {
+            clearTimeout(timeout);
+            parentSignal?.removeEventListener('abort', abortFromParent);
+        }
+    };
+}

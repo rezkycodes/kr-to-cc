@@ -5,10 +5,10 @@
  */
 
 import {
-    KIRO_ENDPOINTS,
     KIRO_API_PATHS,
     KIRO_DEFAULT_REGION,
-    KIRO_MODEL_MAPPING
+    KIRO_MODEL_MAPPING,
+    getKiroEndpoint
 } from '../constants.js';
 import { getKiroAuthData } from '../auth/kiro-token-extractor.js';
 import { buildKiroRequest, buildKiroHeaders } from './request-builder.js';
@@ -24,6 +24,7 @@ import { logger } from '../utils/logger.js';
  */
 export const KIRO_MODEL_CATALOG = [
     // --- Anthropic Claude ---
+    { id: 'claude-opus-5', kiro_id: 'claude-opus-5', owned_by: 'anthropic', description: 'Claude Opus 5 - Strongest Opus for long-running agentic tasks and parallel coordination', context_window: 1000000, cost_multiplier: 2.2, regions: ['us-east-1', 'eu-central-1'], status: 'experimental', thinking: true },
     { id: 'claude-opus-4-8', kiro_id: 'claude-opus-4.8', owned_by: 'anthropic', description: 'Claude Opus 4.8 - Anthropic\'s most honest, highest-reliability Opus model', context_window: 1000000, cost_multiplier: 2.2, regions: ['us-east-1', 'eu-central-1'], status: 'active', thinking: true },
     { id: 'claude-opus-4-7', kiro_id: 'claude-opus-4.7', owned_by: 'anthropic', description: 'Claude Opus 4.7 - Adaptive deep reasoning, precise instruction following', context_window: 1000000, cost_multiplier: 2.2, regions: ['us-east-1', 'eu-central-1'], status: 'active', thinking: true },
     { id: 'claude-opus-4-6', kiro_id: 'claude-opus-4.6', owned_by: 'anthropic', description: 'Claude Opus 4.6 - Top benchmark scores, strong for long sessions and debugging', context_window: 1000000, cost_multiplier: 2.2, regions: ['us-east-1', 'eu-central-1'], status: 'active', thinking: true },
@@ -205,8 +206,7 @@ export async function testKiroModel(kiroModelId, options = {}) {
         'x-amzn-access-model': kiroModelId
     };
 
-    const endpoint = KIRO_ENDPOINTS[region] || KIRO_ENDPOINTS[KIRO_DEFAULT_REGION];
-    const url = `${endpoint}${KIRO_API_PATHS.GENERATE_ASSISTANT}`;
+    const url = `${getKiroEndpoint(region)}${KIRO_API_PATHS.GENERATE_ASSISTANT}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -22,7 +22,7 @@ A proxy server that exposes an **Anthropic-compatible API** backed by **Kiro's A
 
 - **Anthropic-compatible API** — drop-in for Claude Code and other Anthropic clients
 - **Full streaming (SSE)** support
-- **15 models** including Claude Opus 4.8 / 4.7 / 4.6 / 4.5, Sonnet 5 / 4.6 / 4.5 / 4, Haiku 4.5, `auto`, and open-weight models (MiniMax, GLM-5, DeepSeek, Qwen)
+- **16 models** including Claude Opus 5 / 4.8 / 4.7 / 4.6 / 4.5, Sonnet 5 / 4.6 / 4.5 / 4, Haiku 4.5, `auto`, and open-weight models (MiniMax, GLM-5, DeepSeek, Qwen)
 - **Automatic token refresh** — stays signed in until you log out; no repeated `kiro auth`
 - **Browser sign-in UI** (`/oauth/kiro`) — Google/GitHub login, auto-import from Kiro IDE / CLI, or manual token import
 - **Claude Code config UI** (`/config/claude`) — write `~/.claude/settings.json` with a click
@@ -207,6 +207,7 @@ claude
 
 | Model ID | Description | Context | Cost¹ |
 |----------|-------------|:-------:|:-----:|
+| `claude-opus-5` | Claude Opus 5 — strongest for long-running agentic tasks (experimental) | 1M | 2.2x |
 | `claude-opus-4-8` | Claude Opus 4.8 — highest reliability (default) | 1M | 2.2x |
 | `claude-opus-4-7` | Claude Opus 4.7 — adaptive deep reasoning | 1M | 2.2x |
 | `claude-opus-4-6` | Claude Opus 4.6 — long sessions, debugging | 1M | 2.2x |
@@ -303,8 +304,26 @@ kiro-to-claude start --debug
 
 ### Environment Variables
 
-- `PORT` - Server port (default: 4000)
-- `DEBUG` - Enable debug logging (set to 'true')
+- `PORT` - Server port (default: `4000`)
+- `HOST` - Bind address (default: `127.0.0.1`). Set explicitly only when remote access is intentional.
+- `PROXY_API_KEY` - Optional key required by all `/v1/*` routes. Set Claude Code's `ANTHROPIC_AUTH_TOKEN` to the same value.
+- `ALLOWED_ORIGINS` - Optional comma-separated browser origins in addition to localhost origins.
+- `REQUEST_BODY_LIMIT` - Express JSON body limit (default: `10mb`).
+- `UPSTREAM_TIMEOUT_MS` - Kiro request/stream timeout in milliseconds (default: `300000`).
+- `DEBUG` - Enable debug logging (set to `true`).
+
+The proxy binds to localhost by default because it can consume your Kiro quota and
+its management UI can update local Claude Code settings. If you intentionally
+bind it to a non-loopback interface, configure `PROXY_API_KEY`, restrict
+`ALLOWED_ORIGINS`, and place TLS in front of the server.
+
+Example with optional proxy authentication:
+
+```bash
+PROXY_API_KEY="replace-with-a-long-random-value" npm start
+export ANTHROPIC_BASE_URL="http://localhost:4000"
+export ANTHROPIC_AUTH_TOKEN="replace-with-a-long-random-value"
+```
 
 ---
 

@@ -137,36 +137,58 @@ export async function* parseEventStreamAsync(stream) {
  */
 export function extractContentFromEvents(events) {
     let fullContent = '';
-    let usage = { input_tokens: 0, output_tokens: 0 };
-    let toolUses = [];
-    
+    const usage = { input_tokens: 0, output_tokens: 0 };
+    const toolUseMap = new Map();
+
+    const getTool = (toolUseId, name) => {
+        if (!toolUseMap.has(toolUseId)) {
+            toolUseMap.set(toolUseId, { id: toolUseId, name: name || '', inputParts: [], input: null });
+        }
+        const tool = toolUseMap.get(toolUseId);
+        if (name) tool.name = name;
+        return tool;
+    };
+
     for (const event of events) {
-        // Content events
-        if (event.content !== undefined) {
-            fullContent += event.content;
+        if (typeof event.content === 'string') fullContent += event.content;
+
+        const tokenUsage = event.metadataEvent?.tokenUsage || event.tokenUsage;
+        if (tokenUsage) {
+            usage.input_tokens = Number(tokenUsage.inputTokens) || 0;
+            usage.output_tokens = Number(tokenUsage.outputTokens) || 0;
         }
-        
-        // Usage/metering events
-        if (event.unit === 'credit' || event.usage !== undefined) {
-            usage.output_tokens = Math.round((event.usage || 0) * 1000); // Approximate
+
+        const wrapped = event.toolUse || event.toolUseEvent;
+        if (wrapped?.toolUseId) {
+            const tool = getTool(wrapped.toolUseId, wrapped.name);
+            if (typeof wrapped.input === 'string') tool.inputParts.push(wrapped.input);
+            else if (wrapped.input && typeof wrapped.input === 'object') tool.input = wrapped.input;
+            continue;
         }
-        
-        // Tool use events
-        if (event.toolUse || event.toolUseEvent) {
-            const toolUse = event.toolUse || event.toolUseEvent;
-            toolUses.push({
-                id: toolUse.toolUseId,
-                name: toolUse.name,
-                input: toolUse.input
-            });
+
+        // Live CodeWhisperer streams tool calls as top-level fragments:
+        // {toolUseId,name}, then multiple {toolUseId,name,input}, then {stop:true}.
+        if (event.toolUseId) {
+            const tool = getTool(event.toolUseId, event.name);
+            if (typeof event.input === 'string') tool.inputParts.push(event.input);
+            else if (event.input && typeof event.input === 'object') tool.input = event.input;
         }
     }
-    
-    return {
-        content: fullContent,
-        usage,
-        toolUses
-    };
+
+    const toolUses = Array.from(toolUseMap.values()).map((tool) => {
+        let input = tool.input;
+        if (!input) {
+            try {
+                input = JSON.parse(tool.inputParts.join('') || '{}');
+            } catch {
+                input = {};
+            }
+        }
+        if (!input || typeof input !== 'object' || Array.isArray(input)) input = {};
+        return { id: tool.id, name: tool.name, input };
+    });
+
+    return { content: fullContent, usage, toolUses };
 }
 
 export default {

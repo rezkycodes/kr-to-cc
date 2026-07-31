@@ -19,6 +19,7 @@ if (isDebug) {
 }
 
 const PORT = process.env.PORT || DEFAULT_PORT;
+const HOST = process.env.HOST || '127.0.0.1';
 
 /**
  * Render a fixed-width box banner. Handles alignment automatically so lines
@@ -51,8 +52,9 @@ function renderBanner(lines, inner = 64) {
     return out.join('\n');
 }
 
-app.listen(PORT, () => {
-    const base = `http://localhost:${PORT}`;
+app.listen(PORT, HOST, () => {
+    const displayHost = HOST === '127.0.0.1' || HOST === '::1' ? 'localhost' : HOST;
+    const base = `http://${displayHost}:${PORT}`;
     logger.log('\n' + renderBanner([
         { center: 'Kiro to Claude Server' },
         { sep: true },
@@ -79,7 +81,7 @@ app.listen(PORT, () => {
         '  Features:',
         '    - Auto token refresh (stays signed in until you log out)',
         '    - OAuth login + auto-import from Kiro IDE / CLI',
-        '    - 15 models incl. Opus 4.8/4.7, Sonnet 5, open-weight',
+        '    - 16 models incl. Opus 5/4.8, Sonnet 5, open-weight',
         '',
         '  Quick start with Claude Code:',
         `    1) Open ${base}/config/claude and click Apply`,

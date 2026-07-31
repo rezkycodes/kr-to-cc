@@ -1,11 +1,8 @@
 /**
  * Express App — Anthropic-compatible API proxied to AWS CodeWhisperer via Kiro.
- *
- * This module only wires up middleware and delegates all routing to
- * ./routes/index.js. Route handlers live under ./routes, domain logic under
- * ./kiro, ./auth, ./config, and presentation under ./ui.
  */
 
+import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import { REQUEST_BODY_LIMIT } from './constants.js';
@@ -13,28 +10,88 @@ import { logger } from './utils/logger.js';
 import { registerRoutes } from './routes/index.js';
 
 const app = express();
+app.disable('x-powered-by');
 
-// ---- Middleware ----
-app.use(cors());
-app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+function configuredOrigins() {
+    return new Set(
+        (process.env.ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean)
+    );
+}
 
-// Support an ANTHROPIC_BASE_URL that already includes "/v1": the Anthropic SDK
-// appends "/v1/messages", which would otherwise produce "/v1/v1/messages".
-// Collapse a leading duplicate "/v1" so both base URL styles work.
+function isAllowedBrowserOrigin(origin) {
+    if (!origin) return true;
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin)) return true;
+    return configuredOrigins().has(origin);
+}
+
+function safeEqual(actual, expected) {
+    const actualBuffer = Buffer.from(actual || '');
+    const expectedBuffer = Buffer.from(expected || '');
+    return actualBuffer.length === expectedBuffer.length
+        && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function requestApiKey(req) {
+    const authorization = req.get('authorization') || '';
+    const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+    return req.get('x-api-key') || req.get('anthropic-api-key') || bearer || '';
+}
+
+// Baseline headers that do not break the inline local management pages.
 app.use((req, res, next) => {
-    if (req.url.startsWith('/v1/v1/')) {
-        req.url = req.url.slice(3);
-    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     next();
 });
 
-// Request logging.
+app.use(cors({
+    origin(origin, callback) {
+        callback(null, isAllowedBrowserOrigin(origin) ? origin || false : false);
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: [
+        'authorization',
+        'content-type',
+        'x-api-key',
+        'anthropic-api-key',
+        'anthropic-version',
+        'anthropic-beta'
+    ],
+    maxAge: 600
+}));
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+
+// Support base URLs with or without a trailing /v1 segment.
+app.use((req, res, next) => {
+    if (req.url.startsWith('/v1/v1/')) req.url = req.url.slice(3);
+    next();
+});
+
+// Optional local proxy authentication. Claude Code can send this through
+// ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY when PROXY_API_KEY is configured.
+app.use('/v1', (req, res, next) => {
+    const expected = process.env.PROXY_API_KEY;
+    if (!expected || safeEqual(requestApiKey(req), expected)) return next();
+    return res.status(401).json({
+        type: 'error',
+        error: {
+            type: 'authentication_error',
+            message: 'Invalid or missing proxy API key.'
+        }
+    });
+});
+
 app.use((req, res, next) => {
     logger.info(`[${req.method}] ${req.path}`);
     next();
 });
 
-// ---- Routes ----
 registerRoutes(app);
 
+export { isAllowedBrowserOrigin, safeEqual };
 export default app;

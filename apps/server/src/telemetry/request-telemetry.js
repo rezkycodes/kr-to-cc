@@ -51,6 +51,24 @@ function sumReported(events, field) {
     return reported ? total : null;
 }
 
+/**
+ * Group events by a derived key, preserving first-seen order.
+ *
+ * @param {object[]} events
+ * @param {(event: object) => string} keyOf
+ * @returns {Map<string, object[]>}
+ */
+function groupBy(events, keyOf) {
+    const groups = new Map();
+    for (const event of events) {
+        const key = keyOf(event) || 'unknown';
+        const bucket = groups.get(key);
+        if (bucket) bucket.push(event);
+        else groups.set(key, [event]);
+    }
+    return groups;
+}
+
 /** Token and credit totals for a set of events. */
 function usageSummary(events) {
     const input = sumReported(events, 'input_tokens');
@@ -65,8 +83,13 @@ function usageSummary(events) {
         output_tokens: output,
         cached_tokens: cached,
         total_tokens: input === null && output === null ? null : (input || 0) + (output || 0),
-        // Kiro reports no usage, so these are heuristic unless that changes.
+        // Providers differ: Google reports real counts, Kiro reports none and is
+        // estimated locally. With both registered a window usually mixes the two,
+        // so the counts matter more than the flag — `estimated` alone would label
+        // measured Google traffic as guesswork.
         estimated: events.some((event) => event.tokens_estimated === true),
+        estimated_requests: events.filter((event) => event.tokens_estimated === true).length,
+        measured_requests: events.filter((event) => event.tokens_estimated === false).length,
         // Kiro bills per request in credits scaled by model, not per token.
         cost_credits: credits,
         priced_requests: priced.length,
@@ -124,6 +147,9 @@ export class RequestTelemetry {
             route: boundedLabel(metadata.route, '/v1/messages'),
             method: boundedLabel(metadata.method, 'POST', 16).toUpperCase(),
             model: boundedLabel(metadata.model, 'unknown'),
+            // Which upstream served it. 'unresolved' when the model matched no
+            // provider, which is itself worth seeing on the dashboard.
+            provider: boundedLabel(metadata.provider, 'unresolved', 32),
             stream: metadata.stream === true,
             // Kiro prices per request by model, so the rate is known up front.
             // Null means unpriced rather than free.
@@ -134,6 +160,23 @@ export class RequestTelemetry {
         });
         this.emit({ type: 'start' });
         return requestId;
+    }
+
+    /**
+     * Record which model actually served the request.
+     *
+     * For a combo the requested model is the combo name, which says nothing about
+     * where the work went. This captures the member that answered so the
+     * dashboard can attribute traffic to a real upstream.
+     *
+     * @param {string} requestId
+     * @param {{provider: string, model: string}} servedBy
+     */
+    recordServingModel(requestId, servedBy) {
+        const active = this.active.get(requestId);
+        if (!active || !servedBy) return;
+        active.served_provider = boundedLabel(servedBy.provider, 'unknown', 32);
+        active.served_model = boundedLabel(servedBy.model, 'unknown');
     }
 
     /**
@@ -197,6 +240,11 @@ export class RequestTelemetry {
             route: active.route,
             method: active.method,
             model: active.model,
+            provider: active.provider,
+            // For a combo these differ from the requested model/provider: they
+            // name the member that answered.
+            served_model: active.served_model ?? active.model,
+            served_provider: active.served_provider ?? active.provider,
             stream: active.stream,
             outcome,
             status,
@@ -356,6 +404,28 @@ export class RequestTelemetry {
                 canceled: bucketEvents.filter((event) => event.outcome === 'canceled').length,
                 p95_latency_ms: latencySummary(bucketEvents).p95
             })),
+            // Keyed on who *served* the request, not what was asked for: a combo
+            // request names the combo, and attributing it to the combo would hide
+            // which upstream the traffic actually landed on.
+            by_provider: [...groupBy(events, (event) => event.served_provider || event.provider).entries()]
+                .map(([provider, providerEvents]) => {
+                    const succeeded = providerEvents.filter((event) => event.outcome === 'success').length;
+                    const failed = providerEvents.filter((event) => event.outcome === 'failure').length;
+                    const measured = succeeded + failed;
+                    return {
+                        provider,
+                        requests: providerEvents.length,
+                        success: succeeded,
+                        failed,
+                        canceled: providerEvents.filter((event) => event.outcome === 'canceled').length,
+                        success_rate: measured
+                            ? Number(((succeeded / measured) * 100).toFixed(1))
+                            : null,
+                        p95_latency_ms: latencySummary(providerEvents).p95,
+                        usage: usageSummary(providerEvents)
+                    };
+                })
+                .sort((a, b) => b.requests - a.requests),
             by_model: [...modelGroups.entries()]
                 .map(([model, modelEvents]) => {
                     const modelSuccess = modelEvents.filter((event) => event.outcome === 'success').length;
@@ -394,6 +464,7 @@ export class RequestTelemetry {
                 collects: [
                     'request_id', 'route', 'method', 'model', 'stream', 'outcome', 'status',
                     'error_type', 'duration_ms', 'timestamp',
+                    'provider', 'served_provider', 'served_model',
                     'input_tokens', 'output_tokens', 'cached_tokens', 'cost_credits',
                     'tokens_estimated'
                 ],

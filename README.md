@@ -245,6 +245,10 @@ claude
 | `/v1/models` | GET | List available models |
 | `/v1/models/check` | GET/POST | Probe which models are actually active (1 tiny request/model) |
 | `/v1/messages/count_tokens` | POST | Heuristic token count estimate |
+| `/ui/combos` | GET/POST | List or create/replace combos |
+| `/ui/combos/:name` | GET/DELETE | Read or delete one combo |
+| `/ui/providers/:id/models` | GET | That provider's models, with quota |
+| `/ui/providers/:id/models/:model/test` | POST | Send one tiny request to that model |
 | `/ui/telemetry/data` | GET | Telemetry snapshot as JSON |
 | `/ui/telemetry/stream` | GET | Server-Sent Events telemetry stream (see below) |
 
@@ -256,7 +260,122 @@ Three pages, each with its own layout:
 |-----|-------------|
 | `/` or `/dashboard` | **Monitor** — realtime traffic trace, aggregate metrics, per-model and failure breakdowns |
 | `/oauth/kiro` | **Sign in** — Google/GitHub, auto-import from Kiro IDE/CLI, or paste a refresh token |
-| `/config/claude` | **Configure** — edit Claude Code env values with a live JSON preview, plus the model catalog and availability probe |
+| `/config/claude` | **Configure** — edit Claude Code env values with a live JSON preview |
+| `/providers` | **Providers** — accounts per provider: add, enable, reorder, test, remove; plus that provider's models with quota and a per-model test |
+| `/combos` | **Combos** — build and edit combos, with the strategy and member order side by side |
+
+### Providers and accounts
+
+A provider can hold several signed-in accounts. Each carries its own quota, so
+requests rotate between them — on a free tier that is the difference between one
+ceiling and several.
+
+Sign in from the **Providers** page. **Add account** opens a dialog per provider:
+
+- **Google / Antigravity** — a browser popup, with a manual path always shown
+  alongside it (copy the URL, approve, paste the address you land on), because a
+  popup can be blocked or opened in a profile that cannot report back.
+- **Kiro** — pick a method: import a login this machine already has, Google/GitHub
+  sign-in, paste a refresh token, or paste a CLIProxyAPI auth JSON. Pasted
+  credentials are checked against Kiro before being saved, so a bad paste fails on
+  the form rather than on your next request.
+
+Three Kiro methods are listed but not implemented — AWS Builder ID, AWS IAM
+Identity Center, and API key. They are shown greyed out with the reason rather than
+hidden, so it is clear they exist and why they are unavailable. An IDC login already
+made by the Kiro CLI or IDE does work through **import**.
+
+Accounts already on the machine are imported once. For Google that is
+`~/.gemini/antigravity-cli/antigravity-oauth-token` and `~/.gemini/oauth_creds.json`;
+for Kiro it is the Kiro CLI database and the AWS SSO cache the Kiro IDE writes. The import only runs while the store is empty, so
+an account you delete stays deleted.
+
+How failures are handled:
+
+- **A quota error parks that account** for ten minutes rather than disabling it —
+  quota comes back.
+- **Any other error is recorded but leaves the account in rotation.** One transient
+  failure should not cost capacity; the reason shows on the account row.
+- **A revoked login is skipped, not fatal.** If refreshing fails, the next account
+  is tried, so one dead login does not take the provider down.
+
+### Models and quota
+
+Each provider's models are listed on its own detail page, with context window, credit
+multiplier, and a **Test** button that sends one tiny request so you can see whether a
+model actually answers for your account. **Test all** walks the list one at a time —
+sequentially, because each call spends quota and firing them together would make a
+rate-limit impossible to attribute.
+
+Quota is reported the way each provider actually meters, because the two differ and
+flattening them would mislead:
+
+- **Google/Antigravity meters per model — and per account.** Each account holds its
+  own set of model allowances, so the page shows an account picker and the rows
+  report the selected account's remaining fraction and reset time. Merging accounts
+  would invent a total that no single account has. The account's plan comes from
+  Code Assist (`Gemini Code Assist` for a standard tier); Antigravity often omits
+  `currentTier`, so the default allowed tier is used and reported as unknown when
+  absent.
+- **Kiro meters each account in credits.** One monthly allowance is shared by every
+  model, and each model draws from it at its own multiplier — so there is no
+  per-model figure to show. The page reports one block per account instead, since
+  accounts can sit on different plans with different allowances.
+
+Two limitations worth knowing:
+
+- **Some tokens cannot read quota at all.** A Kiro token may return `403` from the
+  usage API while still serving requests fine, and a revoked Google login fails to
+  refresh. Either way that account reports the reason instead of a fabricated
+  number, and its rows show no figure rather than `0%`, which would read as
+  exhausted rather than unknown.
+- **The model list does not depend on a working account.** If every account is spent
+  or revoked the catalog still lists, with the reason shown — only the quota figures
+  and the Test buttons stop working.
+- **A thinking model can spend its whole budget on thought** and return no text. The
+  test allows enough headroom to clear reasoning and still answer, but a pass with an
+  empty reply is reported as such rather than counted as a failure.
+
+`GOOGLE_STICKY_REQUESTS` and `KIRO_STICKY_REQUESTS` (both default `1`) set how many consecutive requests one
+account serves before rotating. Rotating on every single request defeats upstream
+prompt caching, which is keyed per account.
+
+Tokens are stored in `~/.config/kiro-proxy/connections.json` with `0600`
+permissions and are never returned by the management API — the UI only ever sees
+whether a refresh token exists.
+
+### Combos
+
+A combo groups models from any provider under one name and appears in
+`GET /v1/models`, so a client can select it without knowing it is a group. Manage
+them on the **Combos** page (`/combos`) or via `GET`/`POST`/`DELETE /ui/combos`.
+
+Four strategies, chosen per combo:
+
+| Strategy | Behaviour | Cost |
+|----------|-----------|------|
+| `failover` | Try members top to bottom; move on when one errors or hits its quota | One member per request |
+| `load-balance` | Rotate through members to stretch several quotas | One member per request |
+| `router` | Pick by request shape — tools or a large prompt go further down the list | One member per request |
+| `race` | Ask several at once, keep the fastest | **Every** member per request |
+
+Notes worth knowing before relying on them:
+
+- **Member order matters** in all four. `router` assumes members are listed
+  cheapest first; that is a convention it cannot verify.
+- **A stream cannot fail over once it has started.** Members are swapped only
+  before the first event. If a member dies mid-stream the request fails rather
+  than silently restarting on another model, which would send the client
+  overlapping messages.
+- **Only quota and transient errors trigger a retry.** A malformed request fails
+  immediately, since every member would reject it identically.
+- **`race` streaming uses the first member only** — a stream has to commit before
+  latency is known.
+- Combos cannot contain other combos, and cannot take the name of an existing
+  model or provider.
+
+The Monitor page attributes traffic to the member that actually answered, not to
+the combo, so `by_provider` reflects real upstream load.
 
 ### Telemetry stream (`GET /ui/telemetry/stream`)
 
@@ -284,13 +403,16 @@ The Monitor page reports input/output tokens, estimated credits, and a per-reque
 breakdown. Two caveats, because the numbers are not what a billing dashboard would
 show:
 
-- **Token counts are estimates.** Kiro's CodeWhisperer backend returns no token
-  usage — a completed request reports `0` in / `0` out even when it produced text.
-  Counts are therefore estimated locally from the text that crossed the boundary,
-  using the same ~4-characters-per-token heuristic as `/v1/messages/count_tokens`.
-  Good enough to spot a runaway context; wrong for billing.
-- **Cached tokens are never reported.** Kiro exposes no cache-hit information, so
-  the tile shows `—` (unknown) rather than a misleading `0`.
+- **Token counts are measured for Google, estimated for Kiro.** Google's Cloud Code
+  API returns real `usageMetadata`, including the thinking tokens a request spent.
+  Kiro's CodeWhisperer backend returns nothing — a completed request reports `0` in
+  / `0` out even when it produced text — so those counts are estimated locally from
+  the text that crossed the boundary, using the same ~4-characters-per-token
+  heuristic as `/v1/messages/count_tokens`. Each request records which basis it
+  used; the dashboard says *estimated*, *measured*, or *part estimated* accordingly.
+- **Cached tokens depend on the provider.** Google reports cache hits; Kiro exposes
+  no cache information at all, so Kiro-only windows show `—` (unknown) rather than a
+  misleading `0`.
 - **Cost is in Kiro credits, not dollars.** Kiro bills per request scaled by a
   model multiplier (see the Cost column in [Available Models](#available-models)),
   and publishes no per-token dollar rate. Requests on an unrecognised model are

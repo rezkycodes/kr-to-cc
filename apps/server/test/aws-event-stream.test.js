@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractContentFromEvents } from '../src/kiro/aws-event-stream.js';
+import { extractContentFromEvents } from '../src/providers/kiro/aws-event-stream.js';
 
 test('extracts native tool uses and parses JSON string input', () => {
     const extracted = extractContentFromEvents([

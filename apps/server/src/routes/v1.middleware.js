@@ -9,7 +9,7 @@
 
 import crypto from 'crypto';
 import { requestTelemetry } from '../telemetry/request-telemetry.js';
-import { modelCostMultiplier } from '../kiro/model-api.js';
+import { modelCostMultiplier, providerIdForModel } from '../providers/index.js';
 import { API_VERSION } from '../constants.js';
 
 /** Constant-time comparison so a wrong key cannot be timed out character by character. */
@@ -53,6 +53,9 @@ export function messagesTelemetry(req, res, next) {
         method: req.method,
         model: req.body?.model,
         stream: req.body?.stream,
+        // Resolved here rather than in the handler so a request that fails before
+        // dispatch is still attributed to the provider it was headed for.
+        provider: providerIdForModel(req.body?.model),
         costMultiplier: modelCostMultiplier(req.body?.model)
     });
     req.telemetryRequestId = requestId;

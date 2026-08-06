@@ -19,6 +19,13 @@ function testRouter() {
       { path: '/dashboard', component: blank, meta: { title: 'Monitor' } },
       { path: '/oauth/kiro', component: blank, meta: { title: 'Sign in' } },
       { path: '/config/claude', component: blank, meta: { title: 'Configure' } },
+      // The real component, so the test proves the page actually renders on its
+      // own route rather than only that the link exists.
+      {
+        path: '/combos',
+        component: () => import('./pages/CombosPage.vue'),
+        meta: { title: 'Combos' },
+      },
     ],
   });
 }
@@ -31,6 +38,13 @@ describe('app shell', () => {
         const url = String(input);
         if (url.startsWith('/oauth/kiro/status')) return json({ authenticated: true });
         if (url.startsWith('/health')) return json({ status: 'ok' });
+        if (url.startsWith('/ui/combos')) {
+          return json({
+            combos: [],
+            strategies: [{ id: 'failover', label: 'Failover', summary: 's', detail: 'd' }],
+            models: [],
+          });
+        }
         return json({ error: { message: 'unexpected call' } }, 404);
       }),
     );
@@ -41,7 +55,7 @@ describe('app shell', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes the three sections and marks the current one', async () => {
+  it('exposes every section and marks the current one', async () => {
     const router = testRouter();
     await router.push('/config/claude');
     await router.isReady();
@@ -50,9 +64,31 @@ describe('app shell', () => {
     await flushPromises();
 
     const links = wrapper.findAll('nav[aria-label="Sections"] a');
-    expect(links.map((link) => link.text())).toEqual(['Monitor', 'Sign in', 'Configure']);
+    expect(links.map((link) => link.text())).toEqual([
+      'Monitor',
+      'Providers',
+      'Configure',
+      'Combos',
+    ]);
     expect(links[2].attributes('aria-current')).toBe('page');
     expect(links[0].attributes('aria-current')).toBeUndefined();
+
+    wrapper.unmount();
+  });
+
+  it('routes to the combos page, which owns its own section', async () => {
+    const router = testRouter();
+    await router.push('/combos');
+    await router.isReady();
+
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    const links = wrapper.findAll('nav[aria-label="Sections"] a');
+    const combos = links.find((link) => link.text() === 'Combos');
+    expect(combos?.attributes('aria-current')).toBe('page');
+    // Combos moved off the Configure page, so it must render on its own.
+    expect(wrapper.text()).toContain('New combo');
 
     wrapper.unmount();
   });

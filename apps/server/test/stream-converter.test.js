@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AnthropicStreamState } from '../src/kiro/stream-converter.js';
-import { buildKiroToolNameMap, toKiroToolName } from '../src/kiro/request-builder.js';
+import { AnthropicStreamState } from '../src/providers/kiro/stream-converter.js';
+import { buildKiroToolNameMap, toKiroToolName } from '../src/providers/kiro/request-builder.js';
 
 function eventTypes(events) {
     return events.map((event) => event.type);

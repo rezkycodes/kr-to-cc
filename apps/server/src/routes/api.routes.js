@@ -13,16 +13,13 @@
 
 import express from 'express';
 import {
-    sendKiroMessage,
-    sendKiroMessageStream,
-    listKiroModels,
-    checkActiveModels
-} from '../kiro/index.js';
-import {
-    isKiroAuthenticated,
-    isKiroDatabaseAccessible,
-    ensureValidKiroToken
-} from '../auth/kiro-token-extractor.js';
+    listAllModels,
+    listProviders
+} from '../providers/index.js';
+import { resolveTarget, comboModelEntries } from '../combos/resolver.js';
+import { listCombos } from '../combos/store.js';
+import { runOnce, runStream } from '../combos/strategies.js';
+import { DEFAULT_MODEL } from '../constants.js';
 import { logger } from '../utils/logger.js';
 import { requestTelemetry } from '../telemetry/request-telemetry.js';
 import {
@@ -99,20 +96,32 @@ export function normalizeModelCheckOptions(src = {}) {
 }
 
 /**
- * Ensure Kiro is authenticated and accessible. Refreshes the access token (via
- * the stored refresh token) if it is expired or about to expire, which lets the
- * proxy keep working without re-running `kiro auth`.
+ * Ensure at least one provider can serve traffic.
+ *
+ * Used by endpoints that are about the proxy as a whole rather than one model
+ * (/health, the model catalog). Succeeds if any provider is ready and reports
+ * every provider's state, so a second upstream being down never blocks the first.
+ *
+ * @returns {Promise<{ready: {id: string, label: string}[], unavailable: {id: string, reason: string}[]}>}
+ * @throws {Error} when no provider is ready, carrying the first reason
  */
-export async function ensureKiroReady() {
-    if (!isKiroDatabaseAccessible()) {
-        throw new Error('Kiro CLI database not accessible. Please install and authenticate with Kiro CLI.');
+export async function ensureAnyProviderReady() {
+    const ready = [];
+    const unavailable = [];
+    let firstError = null;
+
+    for (const provider of listProviders()) {
+        try {
+            await provider.ensureReady();
+            ready.push({ id: provider.id, label: provider.label });
+        } catch (error) {
+            if (!firstError) firstError = error;
+            unavailable.push({ id: provider.id, reason: error.message });
+        }
     }
 
-    if (!isKiroAuthenticated()) {
-        throw new Error('Kiro CLI not authenticated. Please run "kiro auth" to authenticate.');
-    }
-
-    await ensureValidKiroToken();
+    if (ready.length === 0 && firstError) throw firstError;
+    return { ready, unavailable };
 }
 
 /**
@@ -164,17 +173,20 @@ export function parseError(error) {
 healthRouter.get('/health', async (req, res) => {
     const port = gatewayPort(req);
     try {
-        await ensureKiroReady();
+        const { ready, unavailable } = await ensureAnyProviderReady();
         res.json({
             status: 'ok',
-            backend: 'kiro',
+            // `backend` keeps the old single-value shape for existing callers;
+            // `providers` is the multi-provider view.
+            backend: ready[0].id,
+            providers: { ready, unavailable },
             port,
             timestamp: new Date().toISOString()
         });
     } catch (error) {
         res.status(503).json({
             status: 'error',
-            backend: 'kiro',
+            backend: listProviders()[0]?.id ?? null,
             port,
             error: error.message,
             timestamp: new Date().toISOString()
@@ -187,8 +199,11 @@ healthRouter.get('/health', async (req, res) => {
  */
 router.get('/models', async (req, res) => {
     try {
-        await ensureKiroReady();
-        const models = await listKiroModels();
+        const models = await listAllModels();
+        // Combos are presented as models so clients can select one without
+        // knowing it is a group.
+        const combos = comboModelEntries(listCombos());
+        if (combos.length > 0) models.data = [...models.data, ...combos];
         res.json(models);
     } catch (error) {
         logger.error('[API] Error listing models:', error);
@@ -218,12 +233,22 @@ async function handleModelCheck(req, res) {
     try {
         const src = req.method === 'POST' ? (req.body || {}) : (req.query || {});
         const options = normalizeModelCheckOptions(src);
-        await ensureKiroReady();
+        await ensureAnyProviderReady();
 
         logger.info(`[API] Checking active models${options.models ? ` (${options.models.join(', ')})` : ''}`);
 
-        const result = await checkActiveModels(options);
-        res.json(result);
+        // Only some providers can probe live availability; skip the rest rather
+        // than failing, and label each result with the provider it came from.
+        const results = {};
+        for (const provider of listProviders()) {
+            if (typeof provider.checkActiveModels !== 'function') continue;
+            try {
+                results[provider.id] = await provider.checkActiveModels(options);
+            } catch (error) {
+                results[provider.id] = { error: error.message };
+            }
+        }
+        res.json(results);
     } catch (error) {
         logger.error('[API] Error checking models:', error);
         const { errorType, statusCode, errorMessage } = parseError(error);
@@ -294,6 +319,79 @@ function usageFromStreamEvent(event) {
     return null;
 }
 
+/**
+ * Dispatch a non-streaming request to a single model or through a combo.
+ *
+ * @param {object} target from resolveTarget
+ * @param {object} request Anthropic Messages request
+ * @returns {Promise<{response: object, servedBy: {provider: string, model: string}}>}
+ */
+async function sendFrom(target, request) {
+    if (target.kind === 'single') {
+        const response = await target.provider.sendMessage(request);
+        return { response, servedBy: { provider: target.provider.id, model: target.modelId } };
+    }
+
+    const { result, target: member } = await runOnce(
+        target.combo,
+        target.plan,
+        request,
+        async (candidate) => {
+            await candidate.provider.ensureReady();
+            // Each member gets its own model id; the request object is shared, so
+            // it is copied rather than mutated between attempts.
+            return candidate.provider.sendMessage({ ...request, model: candidate.modelId });
+        }
+    );
+
+    return { response: result, servedBy: { provider: member.provider.id, model: member.modelId } };
+}
+
+/**
+ * Dispatch a streaming request to a single model or through a combo.
+ *
+ * @param {object} target from resolveTarget
+ * @param {object} request
+ * @returns {AsyncGenerator<{event: object, servedBy: {provider: string, model: string}}>}
+ */
+async function* streamFrom(target, request) {
+    if (target.kind === 'single') {
+        const servedBy = { provider: target.provider.id, model: target.modelId };
+        for await (const event of target.provider.sendMessageStream(request)) {
+            yield { event, servedBy };
+        }
+        return;
+    }
+
+    const stream = runStream(
+        target.combo,
+        target.plan,
+        request,
+        (candidate) => (async function* attempt() {
+            await candidate.provider.ensureReady();
+            yield* candidate.provider.sendMessageStream({ ...request, model: candidate.modelId });
+        })()
+    );
+
+    for await (const { event, target: member } of stream) {
+        yield { event, servedBy: { provider: member.provider.id, model: member.modelId } };
+    }
+}
+
+/**
+ * Record which member actually served a combo request.
+ *
+ * Called on every streamed event but only does work once: the answer cannot
+ * change mid-stream, since a member is never replaced after its first event.
+ */
+function noteServingModel(req, servedBy) {
+    if (!servedBy || req._servedBy) return;
+    req._servedBy = servedBy;
+    if (req.telemetryRequestId) {
+        requestTelemetry.recordServingModel(req.telemetryRequestId, servedBy);
+    }
+}
+
 /** Length of the text a streamed event contributes to the reply. */
 function streamEventTextLength(event) {
     if (event?.type !== 'content_block_delta') return 0;
@@ -322,8 +420,6 @@ router.post('/messages', async (req, res) => {
             });
         }
 
-        await ensureKiroReady();
-
         const {
             model,
             messages,
@@ -340,7 +436,7 @@ router.post('/messages', async (req, res) => {
 
         // Build the request object
         const request = {
-            model: model || 'claude-opus-4-6',
+            model: model || DEFAULT_MODEL,
             messages,
             max_tokens: max_tokens ?? 4096,
             stream,
@@ -353,7 +449,23 @@ router.post('/messages', async (req, res) => {
             temperature
         };
 
-        logger.info(`[API] Request for model: ${request.model}, stream: ${!!stream}`);
+        // A model id may name a single model or a combo. Combos are gated per
+        // member at dispatch time, since the point is to tolerate one being down.
+        const target = resolveTarget(request.model);
+
+        if (target.kind === 'single') {
+            // Gate on this provider only: a second upstream being unauthenticated
+            // must not block the first.
+            await target.provider.ensureReady();
+            // Hand the provider the bare id, namespace stripped.
+            request.model = target.modelId;
+            logger.info(`[API] Request for ${target.provider.id}/${request.model}, stream: ${!!stream}`);
+        } else {
+            logger.info(
+                `[API] Request for combo ${target.combo.name} (${target.combo.strategy}, `
+                + `${target.plan.length} members), stream: ${!!stream}`
+            );
+        }
 
         // Recorded before the upstream call so even a failed or aborted request
         // accounts for the prompt it sent.
@@ -379,8 +491,10 @@ router.post('/messages', async (req, res) => {
 
                 try {
                     let outputChars = 0;
-                    for await (const event of sendKiroMessageStream(request)) {
+                    for await (const { event, servedBy } of streamFrom(target, request)) {
                         if (res.destroyed) break;
+                        // Attribute the response to whichever member answered.
+                        noteServingModel(req, servedBy);
                         outputChars += streamEventTextLength(event);
                         // Recorded per event so a client that disconnects mid-stream
                         // still leaves the tokens it had already consumed behind.
@@ -412,7 +526,8 @@ router.post('/messages', async (req, res) => {
                     res.end();
                 }
             } else {
-                const response = await sendKiroMessage(request);
+                const { response, servedBy } = await sendFrom(target, request);
+                noteServingModel(req, servedBy);
                 if (!res.destroyed) {
                     recordUsageTelemetry(req, {
                         output_tokens: estimateTokensForLength(responseTextLength(response)),

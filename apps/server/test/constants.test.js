@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { getKiroEndpoint, KIRO_MODEL_MAPPING } from '../src/constants.js';
-import { KIRO_MODEL_CATALOG, listKiroModels } from '../src/kiro/model-api.js';
+import { KIRO_MODEL_CATALOG, listKiroModels } from '../src/providers/kiro/model-api.js';
 
 test('builds CodeWhisperer endpoints for valid regions not in the static catalog', () => {
     assert.equal(

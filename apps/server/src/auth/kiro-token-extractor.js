@@ -357,6 +357,31 @@ export async function getKiroToken() {
  * Get all Kiro auth data (token + metadata), auto-refreshing when needed.
  * @returns {Promise<Object>} Full auth data
  */
+/**
+ * Point the in-memory credentials at a specific account, without writing to disk.
+ *
+ * The multi-account layer picks which connection serves a request; the request
+ * handlers below still read one "active" credential. This bridges the two so the
+ * handlers did not have to change. Deliberately memory-only: the connection store
+ * is the source of truth now, and persisting here would fight it.
+ *
+ * @param {object} creds
+ */
+export function setActiveKiroCredentials(creds) {
+    if (!creds?.accessToken && !creds?.refreshToken) return;
+    activeCreds = {
+        authKey: creds.authKey || 'kirocli:social:token',
+        accessToken: creds.accessToken,
+        refreshToken: creds.refreshToken || null,
+        expiresAt: creds.expiresAt ? new Date(creds.expiresAt) : null,
+        region: creds.region || 'us-east-1',
+        profileArn: creds.profileArn || null,
+        provider: creds.provider || null,
+        clientId: creds.clientId || null,
+        clientSecret: creds.clientSecret || null
+    };
+}
+
 export async function getKiroAuthData() {
     return ensureValidKiroToken();
 }

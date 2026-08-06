@@ -6,7 +6,6 @@
  */
 import { onMounted } from 'vue';
 import { CheckIcon, CopyIcon, RotateCcwIcon } from '@lucide/vue';
-import ModelCatalog from '../components/ModelCatalog.vue';
 import StatusPip from '../components/StatusPip.vue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -123,7 +122,14 @@ function pick(key: keyof ClaudeConfigValues, value: unknown) {
                     class="w-9 shrink-0 justify-center px-0 [&>span]:hidden"
                     :aria-label="`Choose a ${alias.label} model from the catalog`"
                   />
-                  <SelectContent>
+                  <!--
+                    Anchored with `popper`, not the default `item-aligned`.
+                    item-aligned positions the panel by placing the selected item
+                    over the trigger's value text; this trigger is an icon-only
+                    button with no value and its span hidden, so there is nothing to
+                    align against and the panel lands at the viewport's left edge.
+                  -->
+                  <SelectContent position="popper" align="end" :side-offset="4">
                     <SelectGroup>
                       <SelectItem
                         v-for="model in state?.models ?? []"
@@ -182,7 +188,6 @@ function pick(key: keyof ClaudeConfigValues, value: unknown) {
         </div>
       </dl>
 
-      <ModelCatalog class="mt-4" />
     </aside>
   </div>
 </template>

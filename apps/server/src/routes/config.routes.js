@@ -18,7 +18,7 @@ import {
     buildManualSnippet,
     applyClaudeSettings
 } from '../config/claude-config.js';
-import { listKiroModels } from '../kiro/index.js';
+import { listAllModels } from '../providers/index.js';
 import { gatewayOrigin, pointsAtGateway, baseUrlIssue } from '../utils/gateway-address.js';
 import { API_VERSION } from '../constants.js';
 import { renderPage, ICONS } from '../ui/theme.js';
@@ -246,7 +246,7 @@ router.get('/state', async (req, res) => {
         const current = extractConfig(settings);
         let models = [];
         try {
-            const list = await listKiroModels();
+            const list = await listAllModels();
             models = (list.data || []).map(m => m.id);
         } catch {
             // Model list is best-effort; the UI still works with free-text.

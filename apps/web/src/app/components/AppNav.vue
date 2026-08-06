@@ -8,8 +8,9 @@ const props = defineProps<{ state: GatewayState }>();
 
 const links = [
   { to: '/dashboard', label: 'Monitor' },
-  { to: '/oauth/kiro', label: 'Sign in' },
+  { to: '/providers', label: 'Providers' },
   { to: '/config/claude', label: 'Configure' },
+  { to: '/combos', label: 'Combos' },
 ];
 
 const host = computed(() => {
@@ -24,16 +25,33 @@ const online = computed(() => props.state.healthy);
 
 <template>
   <header class="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-sm">
-    <div class="mx-auto flex h-14 max-w-[1440px] items-center gap-3 px-4 sm:gap-6 sm:px-6">
+    <!--
+      Two rows below `sm`, one row above. With four sections the nav needs more
+      width than is left over after the wordmark and the status pip, so on a phone
+      it takes a row of its own rather than being squeezed into a strip that hides
+      most of the links behind a horizontal scroll.
+    -->
+    <div
+      class="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-3 px-4 sm:h-14 sm:flex-nowrap sm:gap-x-6 sm:px-6"
+    >
       <RouterLink
         to="/dashboard"
-        class="font-mono text-[11px] font-semibold tracking-[0.18em] whitespace-nowrap text-foreground uppercase"
+        class="flex h-14 items-center font-mono text-[11px] font-semibold tracking-[0.18em] whitespace-nowrap text-foreground uppercase"
       >
         kiro<span class="text-muted-foreground"> → </span>claude
       </RouterLink>
 
+      <div class="ml-auto flex h-14 items-center gap-4 sm:order-last sm:ml-0">
+        <StatusPip :state="online" :label="online === false ? 'offline' : host" pulse />
+      </div>
+
+      <!--
+        `order-last` puts this on the second row on a phone; from `sm` up it sits
+        between the wordmark and the pip. `items-stretch` with a fixed height is
+        what lets the active underline sit on the container's bottom edge.
+      -->
       <nav
-        class="no-scrollbar -mx-2 flex h-14 min-w-0 flex-1 items-stretch gap-1 overflow-x-auto overflow-y-hidden"
+        class="no-scrollbar -mx-2 order-last flex h-12 w-full min-w-0 items-stretch gap-1 overflow-x-auto overflow-y-hidden border-t border-border sm:order-none sm:h-14 sm:w-auto sm:flex-1 sm:border-t-0"
         aria-label="Sections"
       >
         <RouterLink
@@ -49,10 +67,6 @@ const online = computed(() => props.state.healthy);
           />
         </RouterLink>
       </nav>
-
-      <div class="flex items-center gap-4">
-        <StatusPip :state="online" :label="online === false ? 'offline' : host" pulse />
-      </div>
     </div>
   </header>
 </template>

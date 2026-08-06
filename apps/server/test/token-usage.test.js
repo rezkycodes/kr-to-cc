@@ -16,7 +16,7 @@ import {
     estimateTokensForLength,
     flattenContent
 } from '../src/telemetry/token-estimate.js';
-import { modelCostMultiplier } from '../src/kiro/model-api.js';
+import { modelCostMultiplier } from '../src/providers/kiro/model-api.js';
 
 /** Collector with a controllable clock. */
 function makeTelemetry() {

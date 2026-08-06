@@ -70,6 +70,12 @@ export const DEFAULT_PORT = 4000;
  * Declared once and reused wherever a path or a base URL has to carry it, so the
  * segment is never spelled out twice in a row anywhere in the codebase.
  */
+/**
+ * Model used when a request omits `model`. Must stay a bare id that the provider
+ * registry can resolve; it is not namespaced so existing clients keep working.
+ */
+export const DEFAULT_MODEL = 'claude-opus-4-6';
+
 export const API_VERSION = '/v1';
 export const TOKEN_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export const MAX_RETRIES = 3; // Max retry attempts

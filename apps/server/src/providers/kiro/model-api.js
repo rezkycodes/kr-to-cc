@@ -9,11 +9,11 @@ import {
     KIRO_DEFAULT_REGION,
     KIRO_MODEL_MAPPING,
     getKiroEndpoint
-} from '../constants.js';
-import { getKiroAuthData } from '../auth/kiro-token-extractor.js';
+} from '../../constants.js';
+import { getKiroAuthData } from '../../auth/kiro-token-extractor.js';
 import { buildKiroRequest, buildKiroHeaders } from './request-builder.js';
 import { parseEventStream, extractContentFromEvents } from './aws-event-stream.js';
-import { logger } from '../utils/logger.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Authoritative Kiro model catalog, based on Kiro's official documentation and
@@ -95,49 +95,12 @@ export async function listKiroModels() {
     };
 }
 
-/**
- * Get usage limits from Kiro
- * Note: This requires the CodeWhispererRuntimeClient, not streaming
- * 
- * @returns {Promise<Object>} Usage limits data
- */
-export async function getKiroUsageLimits() {
-    try {
-        const authData = await getKiroAuthData();
-        const token = authData.accessToken;
-        const region = authData.region || KIRO_DEFAULT_REGION;
-        
-        if (!token) {
-            return {
-                error: 'Not authenticated',
-                limits: null
-            };
-        }
-        
-        // The usage limits API is on the runtime client, not streaming
-        // For now, return placeholder limits
-        // TODO: Implement actual usage limits API call if needed
-        
-        logger.debug('[Kiro] Usage limits not yet implemented');
-        
-        return {
-            limits: {
-                dailyLimit: 'unlimited',
-                monthlyLimit: 'unlimited',
-                used: 0,
-                remaining: 'unlimited'
-            },
-            quotaResetTime: null
-        };
-        
-    } catch (error) {
-        logger.warn(`[Kiro] Failed to get usage limits: ${error.message}`);
-        return {
-            error: error.message,
-            limits: null
-        };
-    }
-}
+// Real usage limits live in ./usage.js. Imported rather than re-exported so the
+// default export below can reference it.
+import { getKiroUsageLimits } from './usage.js';
+
+export { getKiroUsageLimits };
+
 
 /**
  * Candidate models to probe when checking which ones are active.
@@ -333,12 +296,36 @@ export async function getKiroModelInfo(modelId) {
  * @param {string} modelId - Anthropic-style id, with or without a -thinking suffix
  * @returns {number | null}
  */
-export function modelCostMultiplier(modelId) {
+/**
+ * Find a catalog entry by proxy alias or upstream modelId.
+ *
+ * Synchronous and catalog-only, so the registry can route and telemetry can
+ * price on the hot path without awaiting anything. `-thinking` variants resolve
+ * to their base model: they are the same upstream model at the same rate.
+ *
+ * @param {string} modelId
+ * @returns {object|null} the catalog entry, or null when unknown to Kiro
+ */
+export function findCatalogModel(modelId) {
     const id = typeof modelId === 'string' ? modelId.trim() : '';
     if (!id) return null;
-    // `-thinking` variants are the same underlying model at the same rate.
     const base = id.replace(/-thinking$/, '');
-    const model = KIRO_MODEL_CATALOG.find((m) => m.id === base || m.kiro_id === base);
+    return KIRO_MODEL_CATALOG.find((m) => m.id === base || m.kiro_id === base) || null;
+}
+
+/**
+ * Whether Kiro serves this model id. Sync counterpart to isKiroModelAvailable,
+ * which probes the live account and therefore has to be async.
+ *
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+export function catalogHasModel(modelId) {
+    return findCatalogModel(modelId) !== null;
+}
+
+export function modelCostMultiplier(modelId) {
+    const model = findCatalogModel(modelId);
     return typeof model?.cost_multiplier === 'number' ? model.cost_multiplier : null;
 }
 

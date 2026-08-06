@@ -120,32 +120,4 @@ describe('ConfigurePage', () => {
     wrapper.unmount();
   });
 
-  it('only probes model availability after an explicit click', async () => {
-    const fetchMock = stubFetch({
-      '/v1/models/check': () =>
-        json({ results: [{ id: 'claude-opus-4-8', active: true, status: 200, latency_ms: 88 }] }),
-      '/v1/models': () => json({ object: 'list', data: [{ id: 'claude-opus-4-8' }] }),
-    });
-    const wrapper = mount(ConfigurePage);
-    await flushPromises();
-
-    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/v1/models'))).toBe(false);
-
-    await wrapper.get('[data-testid="catalog-toggle"]').trigger('click');
-    await flushPromises();
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/v1/models')).toBe(true);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/v1/models/check'))).toBe(
-      false,
-    );
-
-    await wrapper.get('[data-testid="probe-all"]').trigger('click');
-    await flushPromises();
-
-    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/v1/models/check'))).toBe(
-      true,
-    );
-    expect(wrapper.text()).toContain('88ms');
-
-    wrapper.unmount();
-  });
 });

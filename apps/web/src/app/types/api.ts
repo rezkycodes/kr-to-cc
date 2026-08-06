@@ -46,10 +46,27 @@ export interface UsageSummary {
   output_tokens: number | null;
   cached_tokens: number | null;
   total_tokens: number | null;
+  /** True when any request in the window was estimated rather than measured. */
   estimated: boolean;
+  /** How many requests were locally estimated (Kiro reports no usage). */
+  estimated_requests: number;
+  /** How many carried counts the upstream actually measured (Google does). */
+  measured_requests: number;
   cost_credits: number | null;
   priced_requests: number;
   unpriced_requests: number;
+}
+
+/** Traffic grouped by the provider that actually served it. */
+export interface ProviderTelemetry {
+  provider: string;
+  requests: number;
+  success: number;
+  failed: number;
+  canceled: number;
+  success_rate: number | null;
+  p95_latency_ms: number | null;
+  usage: UsageSummary;
 }
 
 export interface ModelTelemetry {
@@ -66,6 +83,12 @@ export interface ModelTelemetry {
 export interface RecentRequest {
   request_id: string;
   model: string | null;
+  /** Upstream the request was routed to, or 'unresolved' when unmatched. */
+  provider: string;
+  /** Member that actually answered. Differs from `model` for a combo. */
+  served_model: string;
+  /** Provider that actually answered. Differs from `provider` for a combo. */
+  served_provider: string;
   stream: boolean;
   outcome: 'success' | 'failure' | 'canceled';
   status: number | null;
@@ -107,6 +130,7 @@ export interface TelemetrySnapshot {
   latency_ms: LatencySummary;
   series: TelemetryPoint[];
   usage: UsageSummary;
+  by_provider: ProviderTelemetry[];
   by_model: ModelTelemetry[];
   by_error: ErrorTelemetry[];
   recent_requests: RecentRequest[];

@@ -6,7 +6,7 @@ import {
     buildKiroToolNameMap,
     restoreAnthropicToolName,
     toKiroToolName
-} from '../src/kiro/request-builder.js';
+} from '../src/providers/kiro/request-builder.js';
 
 const tools = [
     {

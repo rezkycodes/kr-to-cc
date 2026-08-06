@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import {
     KIRO_MODEL_MAPPING,
     KIRO_HEADERS
-} from '../constants.js';
+} from '../../constants.js';
 
 export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
 const KIRO_TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;

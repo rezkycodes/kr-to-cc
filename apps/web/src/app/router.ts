@@ -22,6 +22,18 @@ export const router = createRouter({
       meta: { title: 'Sign in' },
     },
     {
+      path: '/providers',
+      name: 'providers',
+      component: () => import('./pages/ProvidersPage.vue'),
+      meta: { title: 'Providers' },
+    },
+    {
+      path: '/combos',
+      name: 'combos',
+      component: () => import('./pages/CombosPage.vue'),
+      meta: { title: 'Combos' },
+    },
+    {
       path: '/config/claude',
       name: 'configure',
       component: () => import('./pages/ConfigurePage.vue'),

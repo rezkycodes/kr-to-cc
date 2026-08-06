@@ -52,6 +52,24 @@ function tokens(value: number | null | undefined) {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+/**
+ * How the token counts were arrived at.
+ *
+ * Providers differ: Google reports measured usage, Kiro reports none so it is
+ * estimated locally. A window with both needs to say so rather than labelling
+ * everything one way.
+ */
+const measurementNote = computed(() => {
+  const u = usage.value;
+  if (!u) return '';
+  const estimated = u.estimated_requests ?? 0;
+  const measured = u.measured_requests ?? 0;
+  if (estimated > 0 && measured > 0) return ' · part estimated';
+  if (estimated > 0) return ' · estimated';
+  if (measured > 0) return ' · measured';
+  return '';
+});
+
 /** Kiro credits, the only cost basis the upstream exposes. */
 function credits(value: number | null | undefined) {
   if (value == null) return '—';
@@ -190,7 +208,7 @@ const streamLabel = computed(
         label="Input tokens"
         :value="tokens(usage?.input_tokens)"
         :watch-value="usage?.input_tokens ?? null"
-        :detail="usage?.estimated ? 'estimated · prompt sent' : 'prompt sent'"
+        :detail="`prompt sent${measurementNote}`"
       />
       <MetricCell
         label="Cached tokens"
@@ -203,7 +221,7 @@ const streamLabel = computed(
         :value="tokens(usage?.output_tokens)"
         :watch-value="usage?.output_tokens ?? null"
         :tone="(usage?.output_tokens ?? 0) > 0 ? 'ok' : 'default'"
-        :detail="usage?.estimated ? 'estimated · generated' : 'generated'"
+        :detail="`generated${measurementNote}`"
       />
       <MetricCell
         label="Est. credits"
@@ -333,7 +351,7 @@ const streamLabel = computed(
     <section class="rounded-lg border border-border bg-card" aria-labelledby="recent-heading">
       <header class="flex items-center justify-between border-b border-border px-4 py-2.5">
         <h2 id="recent-heading" class="text-[13px] font-medium">Recent requests</h2>
-        <span class="label-micro">in / out{{ usage?.estimated ? ' · estimated' : '' }}</span>
+        <span class="label-micro">in / out{{ measurementNote }}</span>
       </header>
 
       <Table v-if="recent.length">
@@ -403,8 +421,8 @@ const streamLabel = computed(
     </section>
 
     <p class="px-1 font-mono text-[10px] text-muted-foreground">
-      Memory-only telemetry · token counts are local estimates, Kiro reports none · no prompts,
-      headers, credentials, or response bodies · expires after
+      Memory-only telemetry · Google reports measured tokens, Kiro reports none so those are
+      estimated · no prompts, headers, credentials, or response bodies · expires after
       {{ snapshot?.retention_minutes ?? 360 }} min
     </p>
   </div>

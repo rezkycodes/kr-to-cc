@@ -38,6 +38,25 @@ function setWindow(next: unknown) {
 
 const totals = computed(() => snapshot.value?.totals);
 const latency = computed(() => snapshot.value?.latency_ms);
+const usage = computed(() => snapshot.value?.usage);
+const recent = computed(() => snapshot.value?.recent_requests ?? []);
+
+/**
+ * Compact token counts — 68,784 reads as 68.8k once the column is dense.
+ * Null stays an em dash: the upstream never reported it, which is not zero.
+ */
+function tokens(value: number | null | undefined) {
+  if (value == null) return '—';
+  if (value < 1_000) return String(value);
+  if (value < 1_000_000) return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}k`;
+  return `${(value / 1_000_000).toFixed(1)}M`;
+}
+
+/** Kiro credits, the only cost basis the upstream exposes. */
+function credits(value: number | null | undefined) {
+  if (value == null) return '—';
+  return value < 10 ? value.toFixed(2) : value.toFixed(1);
+}
 
 function count(value: number | null | undefined) {
   return value == null ? '—' : new Intl.NumberFormat().format(value);
@@ -162,6 +181,42 @@ const streamLabel = computed(
       />
     </section>
 
+    <!-- Token and credit accounting over the same window -->
+    <section
+      class="hairline-grid grid-cols-2 overflow-hidden rounded-lg border border-border lg:grid-cols-4"
+      aria-label="Token usage"
+    >
+      <MetricCell
+        label="Input tokens"
+        :value="tokens(usage?.input_tokens)"
+        :watch-value="usage?.input_tokens ?? null"
+        :detail="usage?.estimated ? 'estimated · prompt sent' : 'prompt sent'"
+      />
+      <MetricCell
+        label="Cached tokens"
+        :value="tokens(usage?.cached_tokens)"
+        :watch-value="usage?.cached_tokens ?? null"
+        detail="not reported by Kiro"
+      />
+      <MetricCell
+        label="Output tokens"
+        :value="tokens(usage?.output_tokens)"
+        :watch-value="usage?.output_tokens ?? null"
+        :tone="(usage?.output_tokens ?? 0) > 0 ? 'ok' : 'default'"
+        :detail="usage?.estimated ? 'estimated · generated' : 'generated'"
+      />
+      <MetricCell
+        label="Est. credits"
+        :value="credits(usage?.cost_credits)"
+        :watch-value="usage?.cost_credits ?? null"
+        :detail="
+          usage?.unpriced_requests
+            ? `${usage.priced_requests} priced · ${usage.unpriced_requests} unknown model`
+            : `${usage?.priced_requests ?? 0} requests priced`
+        "
+      />
+    </section>
+
     <div class="grid gap-3 lg:grid-cols-[1.35fr_1fr]">
       <!-- Per-model traffic -->
       <section class="rounded-lg border border-border bg-card" aria-labelledby="models-heading">
@@ -175,6 +230,8 @@ const streamLabel = computed(
             <TableRow>
               <TableHead>Model</TableHead>
               <TableHead class="text-right">Req</TableHead>
+              <TableHead class="text-right">In</TableHead>
+              <TableHead class="text-right">Out</TableHead>
               <TableHead class="text-right">Success</TableHead>
               <TableHead class="text-right">P95</TableHead>
             </TableRow>
@@ -183,6 +240,12 @@ const streamLabel = computed(
             <TableRow v-for="model in snapshot.by_model" :key="model.model">
               <TableCell class="font-mono text-xs">{{ model.model }}</TableCell>
               <TableCell class="text-right font-mono text-xs" data-numeric>{{ model.requests }}</TableCell>
+              <TableCell class="text-right font-mono text-xs text-muted-foreground" data-numeric>
+                {{ tokens(model.usage.input_tokens) }}
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs text-signal-ok" data-numeric>
+                {{ tokens(model.usage.output_tokens) }}
+              </TableCell>
               <TableCell
                 :class="[
                   'text-right font-mono text-xs',
@@ -266,8 +329,82 @@ const streamLabel = computed(
       </section>
     </div>
 
+    <!-- Per-request token flow -->
+    <section class="rounded-lg border border-border bg-card" aria-labelledby="recent-heading">
+      <header class="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <h2 id="recent-heading" class="text-[13px] font-medium">Recent requests</h2>
+        <span class="label-micro">in / out{{ usage?.estimated ? ' · estimated' : '' }}</span>
+      </header>
+
+      <Table v-if="recent.length">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Model</TableHead>
+            <TableHead class="text-right">In / Out</TableHead>
+            <TableHead class="hidden text-right sm:table-cell">Credits</TableHead>
+            <TableHead class="hidden text-right sm:table-cell">Took</TableHead>
+            <TableHead class="text-right">Time</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="request in recent" :key="`${request.request_id}-${request.timestamp}`">
+            <TableCell class="max-w-[16rem]">
+              <span class="flex items-center gap-2">
+                <span
+                  :class="[
+                    'size-1.5 shrink-0 rounded-full',
+                    request.outcome === 'success'
+                      ? 'bg-signal-ok'
+                      : request.outcome === 'canceled'
+                        ? 'bg-signal-hold'
+                        : 'bg-signal-fail',
+                  ]"
+                  aria-hidden="true"
+                />
+                <span class="truncate font-mono text-xs">{{ request.model || 'unknown' }}</span>
+              </span>
+            </TableCell>
+            <TableCell class="text-right font-mono text-xs whitespace-nowrap" data-numeric>
+              <span class="text-muted-foreground">
+                {{ tokens(request.input_tokens) }}<span aria-label="input">↑</span>
+              </span>
+              <span class="ml-2 text-signal-ok">
+                {{ tokens(request.output_tokens) }}<span aria-label="output">↓</span>
+              </span>
+            </TableCell>
+            <TableCell
+              class="hidden text-right font-mono text-xs text-muted-foreground sm:table-cell"
+              data-numeric
+            >
+              {{ credits(request.cost_credits) }}
+            </TableCell>
+            <TableCell
+              class="hidden text-right font-mono text-xs text-muted-foreground sm:table-cell"
+              data-numeric
+            >
+              {{ duration(request.duration_ms) }}
+            </TableCell>
+            <TableCell class="text-right font-mono text-[10px] text-muted-foreground" data-numeric>
+              {{ clockTime(request.timestamp) }}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+
+      <Empty v-else class="py-10">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <RadioIcon />
+          </EmptyMedia>
+          <EmptyTitle>No requests yet</EmptyTitle>
+          <EmptyDescription>Each request appears here with the tokens it moved.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </section>
+
     <p class="px-1 font-mono text-[10px] text-muted-foreground">
-      Memory-only telemetry · no prompts, headers, tokens, or response bodies · expires after
+      Memory-only telemetry · token counts are local estimates, Kiro reports none · no prompts,
+      headers, credentials, or response bodies · expires after
       {{ snapshot?.retention_minutes ?? 360 }} min
     </p>
   </div>

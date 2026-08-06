@@ -322,6 +322,27 @@ export async function getKiroModelInfo(modelId) {
 }
 
 /**
+ * Kiro credit multiplier for a model, relative to `auto` (1.0x).
+ *
+ * Kiro bills per request in credits, scaled by the model, rather than per token —
+ * so this is the only cost basis the upstream actually exposes. Synchronous and
+ * catalog-only so telemetry can price a request without an await or a network
+ * call. Returns null for an unknown model so callers can report it as unpriced
+ * instead of inventing a number.
+ *
+ * @param {string} modelId - Anthropic-style id, with or without a -thinking suffix
+ * @returns {number | null}
+ */
+export function modelCostMultiplier(modelId) {
+    const id = typeof modelId === 'string' ? modelId.trim() : '';
+    if (!id) return null;
+    // `-thinking` variants are the same underlying model at the same rate.
+    const base = id.replace(/-thinking$/, '');
+    const model = KIRO_MODEL_CATALOG.find((m) => m.id === base || m.kiro_id === base);
+    return typeof model?.cost_multiplier === 'number' ? model.cost_multiplier : null;
+}
+
+/**
  * Check if a model is available in Kiro
  * @param {string} modelId - The model ID to check
  * @returns {Promise<boolean>} True if model is available

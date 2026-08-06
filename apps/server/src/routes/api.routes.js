@@ -1,11 +1,14 @@
 /**
  * Core API Routes — Anthropic Messages API compatible (proxied to CodeWhisperer).
  *
- *   GET  /health                      -> health / auth readiness
- *   GET  /v1/models                   -> list available models
- *   GET|POST /v1/models/check         -> probe which models are actually active
- *   POST /v1/messages/count_tokens    -> heuristic token estimate
- *   POST /v1/messages                 -> send a message (streaming + non-streaming)
+ * Two routers are exported. `healthRouter` is mounted at the root; the default
+ * export is mounted at `/v1`, so its paths are written without that prefix.
+ *
+ *   GET  /health                  (root)  -> health / auth readiness
+ *   GET  /models                  (/v1)   -> list available models
+ *   GET|POST /models/check        (/v1)   -> probe which models are actually active
+ *   POST /messages/count_tokens   (/v1)   -> heuristic token estimate
+ *   POST /messages                (/v1)   -> send a message (streaming + non-streaming)
  */
 
 import express from 'express';
@@ -22,9 +25,21 @@ import {
 } from '../auth/kiro-token-extractor.js';
 import { logger } from '../utils/logger.js';
 import { requestTelemetry } from '../telemetry/request-telemetry.js';
+import {
+    estimateRequestTokens,
+    estimateTokensForLength,
+    responseTextLength
+} from '../telemetry/token-estimate.js';
 import { gatewayPort } from '../utils/gateway-address.js';
 
+/**
+ * Versioned API surface. Mounted at `/v1` by the route registry, so every path
+ * below is written relative to that prefix — there is no `/v1` in the strings.
+ */
 const router = express.Router();
+
+/** Unversioned endpoints, mounted at the root. */
+export const healthRouter = express.Router();
 
 /** Validate the subset of Anthropic Messages input required by this proxy. */
 export function validateMessagesRequest(body) {
@@ -146,7 +161,7 @@ export function parseError(error) {
 /**
  * Health check endpoint
  */
-router.get('/health', async (req, res) => {
+healthRouter.get('/health', async (req, res) => {
     const port = gatewayPort(req);
     try {
         await ensureKiroReady();
@@ -170,7 +185,7 @@ router.get('/health', async (req, res) => {
 /**
  * List models endpoint (OpenAI-compatible format)
  */
-router.get('/v1/models', async (req, res) => {
+router.get('/models', async (req, res) => {
     try {
         await ensureKiroReady();
         const models = await listKiroModels();
@@ -222,8 +237,8 @@ async function handleModelCheck(req, res) {
     }
 }
 
-router.get('/v1/models/check', handleModelCheck);
-router.post('/v1/models/check', handleModelCheck);
+router.get('/models/check', handleModelCheck);
+router.post('/models/check', handleModelCheck);
 
 /**
  * Count tokens endpoint - returns a heuristic estimate.
@@ -233,46 +248,10 @@ router.post('/v1/models/check', handleModelCheck);
  * This keeps Anthropic clients (e.g. Claude Code) working, which may call this
  * endpoint before sending a request.
  */
-router.post('/v1/messages/count_tokens', (req, res) => {
+router.post('/messages/count_tokens', (req, res) => {
     try {
-        const { system, messages, tools } = req.body || {};
-
-        const estimateText = (value) => {
-            if (!value) return '';
-            if (typeof value === 'string') return value;
-            if (Array.isArray(value)) {
-                return value
-                    .map((item) => {
-                        if (typeof item === 'string') return item;
-                        if (item && typeof item === 'object') {
-                            // Text/content blocks, tool blocks, etc.
-                            return item.text || item.content
-                                ? (typeof item.content === 'string'
-                                    ? item.content
-                                    : JSON.stringify(item.content || item.text))
-                                : JSON.stringify(item);
-                        }
-                        return '';
-                    })
-                    .join('\n');
-            }
-            if (typeof value === 'object') return JSON.stringify(value);
-            return String(value);
-        };
-
-        let text = '';
-        text += estimateText(system);
-        if (Array.isArray(messages)) {
-            for (const msg of messages) {
-                text += '\n' + estimateText(msg?.content);
-            }
-        }
-        if (tools) {
-            text += '\n' + estimateText(tools);
-        }
-
-        // ~4 characters per token is a common rough approximation for English.
-        const inputTokens = Math.max(1, Math.ceil(text.length / 4));
+        // Same heuristic the dashboard uses, so the two never disagree.
+        const inputTokens = estimateRequestTokens(req.body || {});
 
         res.json({ input_tokens: inputTokens });
     } catch (error) {
@@ -293,9 +272,39 @@ function finishRequestTelemetry(req, result) {
 }
 
 /**
+ * Report upstream token counts for the in-flight request.
+ *
+ * The HTTP-boundary middleware cannot see the response body, so usage has to be
+ * handed over from here. Safe to call repeatedly while a stream runs.
+ */
+function recordUsageTelemetry(req, usage) {
+    if (!req.telemetryRequestId || !usage) return null;
+    return requestTelemetry.recordUsage(req.telemetryRequestId, usage);
+}
+
+/**
+ * Pull Anthropic-shaped token counts out of a streamed event.
+ *
+ * `message_start` carries the input count, `message_delta` the running output
+ * count; everything else has no usage attached.
+ */
+function usageFromStreamEvent(event) {
+    if (event?.type === 'message_start' && event.message?.usage) return event.message.usage;
+    if (event?.usage) return event.usage;
+    return null;
+}
+
+/** Length of the text a streamed event contributes to the reply. */
+function streamEventTextLength(event) {
+    if (event?.type !== 'content_block_delta') return 0;
+    const delta = event.delta || {};
+    return String(delta.text || delta.partial_json || delta.thinking || '').length;
+}
+
+/**
  * Main messages endpoint - Anthropic Messages API compatible
  */
-router.post('/v1/messages', async (req, res) => {
+router.post('/messages', async (req, res) => {
     try {
         const validationError = validateMessagesRequest(req.body);
         if (validationError) {
@@ -346,6 +355,13 @@ router.post('/v1/messages', async (req, res) => {
 
         logger.info(`[API] Request for model: ${request.model}, stream: ${!!stream}`);
 
+        // Recorded before the upstream call so even a failed or aborted request
+        // accounts for the prompt it sent.
+        recordUsageTelemetry(req, {
+            input_tokens: estimateRequestTokens(req.body),
+            estimated: true
+        });
+
         const clientAbort = new AbortController();
         const abortOnClose = () => {
             if (!res.writableEnded) clientAbort.abort();
@@ -362,8 +378,17 @@ router.post('/v1/messages', async (req, res) => {
                 res.flushHeaders();
 
                 try {
+                    let outputChars = 0;
                     for await (const event of sendKiroMessageStream(request)) {
                         if (res.destroyed) break;
+                        outputChars += streamEventTextLength(event);
+                        // Recorded per event so a client that disconnects mid-stream
+                        // still leaves the tokens it had already consumed behind.
+                        recordUsageTelemetry(req, {
+                            output_tokens: estimateTokensForLength(outputChars),
+                            estimated: true
+                        });
+                        recordUsageTelemetry(req, usageFromStreamEvent(event));
                         res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
                         if (res.flush) res.flush();
                     }
@@ -389,6 +414,11 @@ router.post('/v1/messages', async (req, res) => {
             } else {
                 const response = await sendKiroMessage(request);
                 if (!res.destroyed) {
+                    recordUsageTelemetry(req, {
+                        output_tokens: estimateTokensForLength(responseTextLength(response)),
+                        estimated: true
+                    });
+                    recordUsageTelemetry(req, response?.usage);
                     finishRequestTelemetry(req, { outcome: 'success', status: 200 });
                     res.json(response);
                 }

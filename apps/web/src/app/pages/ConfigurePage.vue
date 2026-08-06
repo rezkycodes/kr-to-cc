@@ -26,7 +26,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useClaudeConfig } from '../composables/useClaudeConfig';
 import type { ClaudeConfigValues } from '../types/api';
 
-const { form, state, loading, saving, result, pointsHere, previewJson, load, restoreDefaults, save, copyPreview } =
+const { form, state, loading, saving, result, pointsHere, baseUrlIssue, previewJson, load, restoreDefaults, save, copyPreview } =
   useClaudeConfig();
 
 onMounted(load);
@@ -75,7 +75,11 @@ function pick(key: keyof ClaudeConfigValues, value: unknown) {
             <FieldLabel for="base-url">Endpoint</FieldLabel>
             <Input id="base-url" v-model="form.baseUrl" class="font-mono text-xs" spellcheck="false" />
             <FieldDescription>
-              Where Claude Code sends Messages API calls. Defaults to the proxy serving this page.
+              Where Claude Code sends Messages API calls. The origin works too. Defaults to the
+              proxy serving this page.
+            </FieldDescription>
+            <FieldDescription v-if="baseUrlIssue" class="text-signal-fail">
+              On disk: {{ baseUrlIssue }} Save to correct it.
             </FieldDescription>
           </Field>
 

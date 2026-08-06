@@ -5,13 +5,16 @@
  * catch-all 404. Paths do not overlap, so this order is safe.
  */
 
+import express from 'express';
 import webAppRouter from './web-app.routes.js';
 import dashboardRouter from './dashboard.routes.js';
 import telemetryRouter from './telemetry.routes.js';
 import oauthRouter from './oauth.routes.js';
 import configRouter from './config.routes.js';
-import apiRouter from './api.routes.js';
+import apiRouter, { healthRouter } from './api.routes.js';
+import { messagesTelemetry, proxyAuth } from './v1.middleware.js';
 import { logger } from '../utils/logger.js';
+import { API_VERSION } from '../constants.js';
 
 /**
  * Register all application routes on the given Express app.
@@ -34,8 +37,28 @@ export function registerRoutes(app) {
     // Claude Code configuration UI/API (writes ~/.claude/settings.json).
     app.use('/config/claude', configRouter);
 
-    // Core Anthropic-compatible API (/health, /v1/*).
-    app.use('/', apiRouter);
+    // Unversioned endpoint.
+    app.use('/', healthRouter);
+
+    // Core Anthropic-compatible API.
+    //
+    // Anthropic clients build every request as `baseURL + "/v1/messages"`, so the
+    // version segment comes from the client. When ANTHROPIC_BASE_URL is just the
+    // origin it arrives once; when the setting already ends in the version segment
+    // it arrives twice. Mounting the router both under the version segment and at
+    // the root of the mount absorbs that duplicate, so either spelling of the
+    // setting reaches the same handlers.
+    //
+    // The prefix is written once, as API_VERSION. Nothing rewrites a request URL,
+    // and the route handlers stay relative — `/messages`, never `/v1/messages`.
+    //
+    // Order matters: the version branch has to be tried first, because the root
+    // branch also matches a path that still carries the segment.
+    const versioned = express.Router();
+    for (const inner of [API_VERSION, '/']) {
+        versioned.use(inner, messagesTelemetry, proxyAuth, apiRouter);
+    }
+    app.use(API_VERSION, versioned);
 
     // Catch-all for unsupported endpoints.
     app.use('*', (req, res) => {

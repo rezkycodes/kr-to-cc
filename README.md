@@ -131,8 +131,11 @@ Open `http://localhost:4000/config/claude`, pick your models, and click **Apply*
 The proxy merges the right settings into `~/.claude/settings.json` (preserving your
 other settings and writing a timestamped backup first). Then restart Claude Code.
 
-> **Base URL:** use `http://localhost:4000` (no `/v1` suffix). The Anthropic SDK
-> appends `/v1/messages` itself.
+> **Base URL:** `http://localhost:4000/v1` (what the Configure page writes) or the
+> bare origin `http://localhost:4000`. Claude Code appends its own `/v1/messages`
+> to this setting, so the first form requests `/v1/v1/messages` and the second
+> requests `/v1/messages`; the proxy mounts its API at both prefixes, so either
+> works. Anything else in the path will be carried into the request and 404.
 
 ### Manual: edit settings.json
 
@@ -274,6 +277,24 @@ Frames:
 At most 8 concurrent stream clients are accepted; further connections get `503`.
 Telemetry lives in memory only — no request or response bodies are recorded, and
 everything is discarded when the process exits.
+
+#### Token and cost figures
+
+The Monitor page reports input/output tokens, estimated credits, and a per-request
+breakdown. Two caveats, because the numbers are not what a billing dashboard would
+show:
+
+- **Token counts are estimates.** Kiro's CodeWhisperer backend returns no token
+  usage — a completed request reports `0` in / `0` out even when it produced text.
+  Counts are therefore estimated locally from the text that crossed the boundary,
+  using the same ~4-characters-per-token heuristic as `/v1/messages/count_tokens`.
+  Good enough to spot a runaway context; wrong for billing.
+- **Cached tokens are never reported.** Kiro exposes no cache-hit information, so
+  the tile shows `—` (unknown) rather than a misleading `0`.
+- **Cost is in Kiro credits, not dollars.** Kiro bills per request scaled by a
+  model multiplier (see the Cost column in [Available Models](#available-models)),
+  and publishes no per-token dollar rate. Requests on an unrecognised model are
+  counted as *unpriced* rather than free.
 
 ---
 

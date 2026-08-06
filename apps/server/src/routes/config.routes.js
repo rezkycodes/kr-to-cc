@@ -19,7 +19,8 @@ import {
     applyClaudeSettings
 } from '../config/claude-config.js';
 import { listKiroModels } from '../kiro/index.js';
-import { gatewayOrigin } from '../utils/gateway-address.js';
+import { gatewayOrigin, pointsAtGateway, baseUrlIssue } from '../utils/gateway-address.js';
+import { API_VERSION } from '../constants.js';
 import { renderPage, ICONS } from '../ui/theme.js';
 import { logger } from '../utils/logger.js';
 
@@ -38,13 +39,17 @@ function defaultConfig(baseUrl) {
 }
 
 /**
- * Base URL Claude Code should use (this proxy, including the /v1 path).
+ * Value written to ANTHROPIC_BASE_URL: this proxy, including the version segment.
+ *
+ * Anthropic clients append their own versioned path, so the segment arrives twice
+ * with this form and once with a bare origin. The route registry accepts both, so
+ * either is valid; this is the spelling the UI proposes.
  *
  * Claude Code talks to Express directly, so the port must be Express' own —
  * never the port of whatever dev server proxied this page.
  */
 function suggestedBaseUrl(req) {
-    return `${gatewayOrigin(req)}/v1`;
+    return `${gatewayOrigin(req)}${API_VERSION}`;
 }
 
 function modelRow(label, id, note) {
@@ -184,7 +189,7 @@ const SCRIPT = `
     $('haikuModel').value = c.haikuModel || d.defaults.haikuModel;
     $('subagentModel').value = c.subagentModel || d.defaults.subagentModel;
     const cur = d.current && d.current.baseUrl ? d.current.baseUrl : '(not set)';
-    const pointsHere = d.current && d.current.baseUrl === d.suggestedBaseUrl;
+    const pointsHere = !!d.pointsHere;
     $('current').textContent = cur + (d.current && d.current.baseUrl && !pointsHere ? '  → will change to ' + d.suggestedBaseUrl : '');
     $('pathInfo').textContent = d.settingsPath;
     $('manualPath').textContent = d.settingsPath;
@@ -253,6 +258,11 @@ router.get('/state', async (req, res) => {
             current,
             models,
             suggestedBaseUrl: suggestedBaseUrl(req),
+            // Whether what is on disk already reaches this gateway, and if not,
+            // why. Decided here so the Vue page and the legacy page agree and so
+            // the explanation is testable server-side.
+            pointsHere: pointsAtGateway(req, current.baseUrl),
+            baseUrlIssue: baseUrlIssue(req, current.baseUrl),
             defaults: defaultConfig(suggestedBaseUrl(req))
         });
     } catch (error) {

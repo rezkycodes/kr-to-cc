@@ -33,6 +33,25 @@ export interface TelemetryPoint {
   p95_latency_ms?: number | null;
 }
 
+/**
+ * Token and credit accounting.
+ *
+ * `null` means "never reported" rather than zero. Kiro's backend sends no token
+ * usage at all, so counts are estimated locally and `estimated` is true; cached
+ * tokens have no source whatsoever and stay null. Cost is in Kiro credits (a
+ * per-request multiplier), which is the only basis the upstream exposes.
+ */
+export interface UsageSummary {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  total_tokens: number | null;
+  estimated: boolean;
+  cost_credits: number | null;
+  priced_requests: number;
+  unpriced_requests: number;
+}
+
 export interface ModelTelemetry {
   model: string;
   requests: number;
@@ -41,6 +60,23 @@ export interface ModelTelemetry {
   canceled: number;
   success_rate: number | null;
   p95_latency_ms: number | null;
+  usage: UsageSummary;
+}
+
+export interface RecentRequest {
+  request_id: string;
+  model: string | null;
+  stream: boolean;
+  outcome: 'success' | 'failure' | 'canceled';
+  status: number | null;
+  error_type: string | null;
+  duration_ms: number | null;
+  timestamp: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cached_tokens: number | null;
+  tokens_estimated: boolean;
+  cost_credits: number | null;
 }
 
 export interface ErrorTelemetry {
@@ -70,8 +106,10 @@ export interface TelemetrySnapshot {
   totals: TelemetryTotals;
   latency_ms: LatencySummary;
   series: TelemetryPoint[];
+  usage: UsageSummary;
   by_model: ModelTelemetry[];
   by_error: ErrorTelemetry[];
+  recent_requests: RecentRequest[];
   recent_failures: RecentFailure[];
 }
 
@@ -120,5 +158,9 @@ export interface ClaudeConfigState {
   current: Partial<ClaudeConfigValues> | null;
   models: string[];
   suggestedBaseUrl: string;
+  /** Server verdict: does the base URL on disk already reach this gateway? */
+  pointsHere: boolean;
+  /** Why it does not, when it does not. Null when the value is correct. */
+  baseUrlIssue: string | null;
   defaults: ClaudeConfigValues;
 }

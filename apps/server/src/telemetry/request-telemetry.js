@@ -32,6 +32,50 @@ function latencySummary(events) {
     };
 }
 
+/**
+ * Sum a field across events, returning null when nothing reported it.
+ *
+ * The distinction matters: 0 means "the upstream told us zero", null means "we
+ * were never told". Cached tokens are always the latter today.
+ */
+function sumReported(events, field) {
+    let total = 0;
+    let reported = 0;
+    for (const event of events) {
+        const value = event[field];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            total += value;
+            reported++;
+        }
+    }
+    return reported ? total : null;
+}
+
+/** Token and credit totals for a set of events. */
+function usageSummary(events) {
+    const input = sumReported(events, 'input_tokens');
+    const output = sumReported(events, 'output_tokens');
+    const cached = sumReported(events, 'cached_tokens');
+    const priced = events.filter((event) => typeof event.cost_credits === 'number');
+    const credits = priced.length
+        ? Number(priced.reduce((sum, event) => sum + event.cost_credits, 0).toFixed(3))
+        : null;
+    return {
+        input_tokens: input,
+        output_tokens: output,
+        cached_tokens: cached,
+        total_tokens: input === null && output === null ? null : (input || 0) + (output || 0),
+        // Kiro reports no usage, so these are heuristic unless that changes.
+        estimated: events.some((event) => event.tokens_estimated === true),
+        // Kiro bills per request in credits scaled by model, not per token.
+        cost_credits: credits,
+        priced_requests: priced.length,
+        unpriced_requests: events.filter(
+            (event) => event.outcome === 'success' && typeof event.cost_credits !== 'number'
+        ).length
+    };
+}
+
 export class RequestTelemetry {
     constructor({
         now = Date.now,
@@ -80,10 +124,57 @@ export class RequestTelemetry {
             route: boundedLabel(metadata.route, '/v1/messages'),
             method: boundedLabel(metadata.method, 'POST', 16).toUpperCase(),
             model: boundedLabel(metadata.model, 'unknown'),
-            stream: metadata.stream === true
+            stream: metadata.stream === true,
+            // Kiro prices per request by model, so the rate is known up front.
+            // Null means unpriced rather than free.
+            cost_multiplier: Number.isFinite(metadata.costMultiplier)
+                ? metadata.costMultiplier
+                : null,
+            usage: null
         });
         this.emit({ type: 'start' });
         return requestId;
+    }
+
+    /**
+     * Attach token counts to an in-flight request.
+     *
+     * Counts arrive from the upstream response body, which the HTTP-boundary
+     * middleware never sees, so the route handler reports them here and finish()
+     * folds them into the event. Called more than once during a stream.
+     *
+     * Precedence: a non-zero count reported by the upstream always wins over a
+     * local estimate, and a later value of the same kind replaces an earlier one.
+     * Kiro currently reports nothing, so in practice these are estimates — the
+     * `estimated` flag is what the dashboard labels them with.
+     *
+     * Only integer counts are kept — never prompt text, never a raw upstream
+     * usage object.
+     *
+     * @param {string} requestId
+     * @param {{ input_tokens?: number, output_tokens?: number, cached_tokens?: number,
+     *           estimated?: boolean }} usage
+     */
+    recordUsage(requestId, usage = {}) {
+        const active = this.active.get(requestId);
+        if (!active) return null;
+        const estimated = usage?.estimated === true;
+        const current = active.usage || { estimated: {} };
+        const next = { ...current, estimated: { ...current.estimated } };
+
+        for (const field of ['input_tokens', 'output_tokens', 'cached_tokens']) {
+            const value = Number(usage?.[field]);
+            if (!Number.isFinite(value) || value < 0) continue;
+            // An upstream zero carries no information here, so never let it
+            // overwrite an estimate we already have.
+            if (!estimated && value === 0 && next[field] != null) continue;
+            if (estimated && next[field] != null && next.estimated[field] === false) continue;
+            next[field] = Math.round(value);
+            next.estimated[field] = estimated;
+        }
+
+        active.usage = next;
+        return active.usage;
     }
 
     finish(requestId, result = {}) {
@@ -98,6 +189,7 @@ export class RequestTelemetry {
         const status = Number.isInteger(result.status)
             ? Math.min(599, Math.max(100, result.status))
             : (outcome === 'success' ? 200 : 500);
+        const usage = this.recordUsage(requestId, result.usage || {}) || active.usage;
         const event = {
             request_id: active.request_id,
             timestamp: new Date(now).toISOString(),
@@ -111,7 +203,18 @@ export class RequestTelemetry {
             error_type: outcome === 'success'
                 ? null
                 : boundedLabel(result.errorType, outcome === 'canceled' ? 'client_abort' : 'api_error', 64),
-            duration_ms: Math.max(0, Math.round(now - active.started_at_ms))
+            duration_ms: Math.max(0, Math.round(now - active.started_at_ms)),
+            input_tokens: usage?.input_tokens ?? null,
+            output_tokens: usage?.output_tokens ?? null,
+            // Kiro does not report cache hits, so this stays null (unknown) rather
+            // than 0, which would wrongly read as "nothing was cached".
+            cached_tokens: usage?.cached_tokens ?? null,
+            // True when any count came from the local heuristic rather than upstream.
+            tokens_estimated: usage
+                ? Object.values(usage.estimated || {}).some((value) => value === true)
+                : false,
+            // A request only consumes credits if it reached the model.
+            cost_credits: outcome === 'success' ? active.cost_multiplier : null
         };
 
         this.events.push(event);
@@ -245,6 +348,7 @@ export class RequestTelemetry {
                 success_rate: measured ? Number(((success / measured) * 100).toFixed(1)) : null
             },
             latency_ms: latencySummary(events),
+            usage: usageSummary(events),
             series: [...buckets.entries()].map(([timestampMs, bucketEvents]) => ({
                 timestamp: new Date(timestampMs).toISOString(),
                 success: bucketEvents.filter((event) => event.outcome === 'success').length,
@@ -266,13 +370,20 @@ export class RequestTelemetry {
                         success_rate: modelMeasured
                             ? Number(((modelSuccess / modelMeasured) * 100).toFixed(1))
                             : null,
-                        p95_latency_ms: latencySummary(modelEvents).p95
+                        p95_latency_ms: latencySummary(modelEvents).p95,
+                        usage: usageSummary(modelEvents)
                     };
                 })
                 .sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model)),
             by_error: [...errorGroups.entries()]
                 .map(([type, count]) => ({ type, count }))
                 .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type)),
+            // Newest first, every outcome — the token columns are only meaningful
+            // next to the request that produced them.
+            recent_requests: events
+                .slice(-25)
+                .reverse()
+                .map(({ timestamp_ms, ...event }) => event),
             recent_failures: events
                 .filter((event) => event.outcome !== 'success')
                 .slice(-20)
@@ -280,8 +391,14 @@ export class RequestTelemetry {
                 .map(({ timestamp_ms, ...event }) => event),
             privacy: {
                 storage: 'memory_only',
-                collects: ['request_id', 'route', 'method', 'model', 'stream', 'outcome', 'status', 'error_type', 'duration_ms', 'timestamp'],
-                excludes: ['prompt', 'system', 'messages', 'tools', 'headers', 'tokens', 'response_body']
+                collects: [
+                    'request_id', 'route', 'method', 'model', 'stream', 'outcome', 'status',
+                    'error_type', 'duration_ms', 'timestamp',
+                    'input_tokens', 'output_tokens', 'cached_tokens', 'cost_credits',
+                    'tokens_estimated'
+                ],
+                // Token *counts* are collected; credentials and content are not.
+                excludes: ['prompt', 'system', 'messages', 'tools', 'headers', 'auth_tokens', 'response_body']
             }
         };
     }

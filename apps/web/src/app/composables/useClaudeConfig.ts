@@ -23,10 +23,15 @@ export function useClaudeConfig() {
   const saving = ref(false);
   const result = ref<ActionResult | null>(null);
 
-  const pointsHere = computed(() => {
-    const current = state.value?.current?.baseUrl;
-    return Boolean(current && current === state.value?.suggestedBaseUrl);
-  });
+  /**
+   * Whether settings.json on disk already reaches this gateway. The server
+   * decides, because it is the only side that knows the base URL is accepted
+   * with or without a trailing `/v1`.
+   */
+  const pointsHere = computed(() => state.value?.pointsHere === true);
+
+  /** Server-authored explanation of a wrong base URL, for the endpoint field. */
+  const baseUrlIssue = computed(() => (pointsHere.value ? null : state.value?.baseUrlIssue ?? null));
 
   const previewJson = computed(() =>
     JSON.stringify(
@@ -134,6 +139,7 @@ export function useClaudeConfig() {
     saving,
     result,
     pointsHere,
+    baseUrlIssue,
     previewJson,
     load,
     restoreDefaults,

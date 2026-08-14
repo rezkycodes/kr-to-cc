@@ -13,11 +13,14 @@
 
 import express from 'express';
 import {
-    listAllModels,
     listProviders
 } from '../providers/index.js';
-import { resolveTarget, comboModelEntries } from '../combos/resolver.js';
-import { listCombos } from '../combos/store.js';
+import { resolveTarget, listSelectableModels } from '../combos/resolver.js';
+import {
+    anthropicToOpenai,
+    createOpenaiStreamTranslator,
+    openaiToAnthropic
+} from '../openai/translate.js';
 import { runOnce, runStream } from '../combos/strategies.js';
 import { DEFAULT_MODEL } from '../constants.js';
 import { logger } from '../utils/logger.js';
@@ -199,12 +202,7 @@ healthRouter.get('/health', async (req, res) => {
  */
 router.get('/models', async (req, res) => {
     try {
-        const models = await listAllModels();
-        // Combos are presented as models so clients can select one without
-        // knowing it is a group.
-        const combos = comboModelEntries(listCombos());
-        if (combos.length > 0) models.data = [...models.data, ...combos];
-        res.json(models);
+        res.json(await listSelectableModels());
     } catch (error) {
         logger.error('[API] Error listing models:', error);
         res.status(500).json({
@@ -402,6 +400,127 @@ function streamEventTextLength(event) {
 /**
  * Main messages endpoint - Anthropic Messages API compatible
  */
+/**
+ * POST /chat/completions — the OpenAI-shaped entry point.
+ *
+ * Translates into the same Anthropic request the rest of the gateway uses, so
+ * combos, provider rotation, quota parking, and telemetry all apply unchanged.
+ * Exists because some clients only speak OpenAI: Pi Agent declares a provider as
+ * `"api": "openai-completions"` and would otherwise get a 404 here.
+ */
+router.post('/chat/completions', async (req, res) => {
+    /** OpenAI reports errors under a different envelope than Anthropic. */
+    const fail = (status, type, message) => {
+        finishRequestTelemetry(req, { outcome: 'failure', status, errorType: type });
+        return res.status(status).json({ error: { message, type, code: null, param: null } });
+    };
+
+    const { request, problems } = openaiToAnthropic(req.body);
+    if (problems.length > 0) {
+        return fail(400, 'invalid_request_error', problems.join(' '));
+    }
+
+    request.model = request.model || DEFAULT_MODEL;
+    const requestedModel = request.model;
+    const wantsStream = request.stream === true;
+
+    try {
+        const target = resolveTarget(request.model);
+        if (target.kind === 'single') {
+            await target.provider.ensureReady();
+            request.model = target.modelId;
+            logger.info(
+                `[API] OpenAI request for ${target.provider.id}/${request.model}, stream: ${wantsStream}`
+            );
+        } else {
+            logger.info(
+                `[API] OpenAI request for combo ${target.combo.name} `
+                + `(${target.combo.strategy}, ${target.plan.length} members), stream: ${wantsStream}`
+            );
+        }
+
+        recordUsageTelemetry(req, {
+            input_tokens: estimateRequestTokens(request),
+            estimated: true
+        });
+
+        const clientAbort = new AbortController();
+        const abortOnClose = () => {
+            if (!res.writableEnded) clientAbort.abort();
+        };
+        res.once('close', abortOnClose);
+        request.signal = clientAbort.signal;
+
+        if (wantsStream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+
+            const translator = createOpenaiStreamTranslator(requestedModel);
+            try {
+                let outputChars = 0;
+                for await (const { event, servedBy } of streamFrom(target, request)) {
+                    if (res.destroyed) break;
+                    noteServingModel(req, servedBy);
+                    outputChars += streamEventTextLength(event);
+                    recordUsageTelemetry(req, {
+                        output_tokens: estimateTokensForLength(outputChars),
+                        estimated: true
+                    });
+                    recordUsageTelemetry(req, usageFromStreamEvent(event));
+
+                    // One Anthropic event can produce none or several OpenAI chunks.
+                    for (const chunk of translator.translate(event)) {
+                        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    }
+                    if (res.flush) res.flush();
+                }
+                if (!res.destroyed) {
+                    // OpenAI terminates a stream with this sentinel, not an event.
+                    res.write('data: [DONE]\n\n');
+                    finishRequestTelemetry(req, { outcome: 'success', status: 200 });
+                    res.end();
+                }
+            } catch (streamError) {
+                if (clientAbort.signal.aborted || res.destroyed) return;
+                logger.error('[API] OpenAI stream error:', streamError);
+                const { errorType, statusCode, errorMessage } = parseError(streamError);
+                finishRequestTelemetry(req, {
+                    outcome: 'failure',
+                    status: statusCode,
+                    errorType
+                });
+                res.write(`data: ${JSON.stringify({
+                    error: { message: errorMessage, type: errorType }
+                })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
+            return undefined;
+        }
+
+        const { response, servedBy } = await sendFrom(target, request);
+        noteServingModel(req, servedBy);
+        if (res.destroyed) return undefined;
+
+        recordUsageTelemetry(req, {
+            output_tokens: estimateTokensForLength(responseTextLength(response)),
+            estimated: true
+        });
+        recordUsageTelemetry(req, response?.usage);
+        finishRequestTelemetry(req, { outcome: 'success', status: 200 });
+        // The model echoed back is what the client asked for, so a combo name does
+        // not silently become a member id in the client's own logs.
+        return res.json(anthropicToOpenai(response, requestedModel));
+    } catch (error) {
+        logger.error('[API] OpenAI error:', error);
+        const { errorType, statusCode, errorMessage } = parseError(error);
+        return fail(statusCode, errorType, errorMessage);
+    }
+});
+
 router.post('/messages', async (req, res) => {
     try {
         const validationError = validateMessagesRequest(req.body);

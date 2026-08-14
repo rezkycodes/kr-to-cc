@@ -18,7 +18,8 @@ import {
     buildManualSnippet,
     applyClaudeSettings
 } from '../config/claude-config.js';
-import { listAllModels } from '../providers/index.js';
+import { listSelectableModels } from '../combos/resolver.js';
+import { COMBO_NAMESPACE } from '../combos/store.js';
 import { gatewayOrigin, pointsAtGateway, baseUrlIssue } from '../utils/gateway-address.js';
 import { API_VERSION } from '../constants.js';
 import { renderPage, ICONS } from '../ui/theme.js';
@@ -245,9 +246,15 @@ router.get('/state', async (req, res) => {
         const { exists, settings, error } = readClaudeSettings();
         const current = extractConfig(settings);
         let models = [];
+        let combos = [];
         try {
-            const list = await listAllModels();
+            // Combos included: the page writes a model name into settings.json,
+            // and a combo is a valid thing for a client to select.
+            const list = await listSelectableModels();
             models = (list.data || []).map(m => m.id);
+            // Named separately so the picker can group them. Without this a combo
+            // sits last in a list of forty-odd ids with nothing marking it out.
+            combos = (list.data || []).filter(m => m.provider === COMBO_NAMESPACE).map(m => m.id);
         } catch {
             // Model list is best-effort; the UI still works with free-text.
         }
@@ -257,6 +264,7 @@ router.get('/state', async (req, res) => {
             error,
             current,
             models,
+            combos,
             suggestedBaseUrl: suggestedBaseUrl(req),
             // Whether what is on disk already reaches this gateway, and if not,
             // why. Decided here so the Vue page and the legacy page agree and so
@@ -302,3 +310,4 @@ router.post('/manual', (req, res) => {
 });
 
 export default router;
+

@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 
+import { logger } from '../utils/logger.js';
+import { recordUsageEvent } from './usage-store.js';
+
 const DEFAULT_RETENTION_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_EVENTS = 2_000;
 const BUCKET_MS = 60_000;
@@ -112,6 +115,9 @@ export class RequestTelemetry {
         this.events = [];
         this.active = new Map();
         this.listeners = new Set();
+        // Sinks see each completed event once. Kept separate from `listeners`,
+        // which only learn that something changed, not what.
+        this.sinks = new Set();
     }
 
     /**
@@ -124,6 +130,18 @@ export class RequestTelemetry {
         if (typeof listener !== 'function') return () => {};
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
+    }
+
+    /**
+     * Receive every completed event, for anything that wants to persist or
+     * forward them.
+     *
+     * @param {(event: object) => void} sink
+     * @returns {() => void} unsubscribe
+     */
+    addSink(sink) {
+        this.sinks.add(sink);
+        return () => this.sinks.delete(sink);
     }
 
     /** @param {{ type: 'start' | 'finish' }} change */
@@ -266,6 +284,15 @@ export class RequestTelemetry {
         };
 
         this.events.push(event);
+        // Handed to sinks before pruning can drop it. A throwing sink must not be
+        // able to fail the request it is describing.
+        for (const sink of this.sinks) {
+            try {
+                sink(event);
+            } catch (error) {
+                logger.debug?.(`[Telemetry] Sink failed: ${error.message}`);
+            }
+        }
         this.prune(now);
         if (this.events.length > this.maxEvents) {
             this.events.splice(0, this.events.length - this.maxEvents);
@@ -476,5 +503,9 @@ export class RequestTelemetry {
 }
 
 export const requestTelemetry = new RequestTelemetry();
+
+// Every completed request is folded into the persistent daily rollups. Done here
+// rather than in a route so no request path can forget to do it.
+requestTelemetry.addSink(recordUsageEvent);
 
 export default requestTelemetry;

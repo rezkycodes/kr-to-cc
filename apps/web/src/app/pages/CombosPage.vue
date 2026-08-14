@@ -39,6 +39,37 @@ const editing = ref<string | null>(null);
 
 const chosenStrategy = computed(() => strategies.value.find((s) => s.id === strategy.value));
 
+/** Combos whose strategy is being switched, so each row disables its own control. */
+const switching = ref<Set<string>>(new Set());
+
+/**
+ * Change a saved combo's strategy without going through the editor.
+ *
+ * Members and order are untouched — only the strategy is replaced. The editor is
+ * still the place to change membership.
+ */
+async function switchStrategy(combo: Combo, next: unknown) {
+  const value = String(next ?? '');
+  if (!value || value === combo.strategy) return;
+
+  switching.value = new Set([...switching.value, combo.name]);
+  try {
+    await save(
+      {
+        name: combo.name,
+        strategy: value,
+        members: combo.members.map((m) => m.model)
+      },
+      // Replaces itself, so the name is not reported as already taken.
+      combo.name
+    );
+  } finally {
+    const next = new Set(switching.value);
+    next.delete(combo.name);
+    switching.value = next;
+  }
+}
+
 /**
  * Member order is meaningful in every strategy, but it means something different
  * in each, so the hint changes with the selection rather than being generic.
@@ -130,7 +161,7 @@ onMounted(load);
             <FieldLabel for="combo-name">Name</FieldLabel>
             <Input id="combo-name" v-model="name" placeholder="fast" autocomplete="off" spellcheck="false" />
             <FieldDescription>
-              Lowercase letters, digits, and hyphens. Cannot reuse a model or provider name.
+              Lowercase letters, digits, dots, and hyphens. Cannot reuse a model or provider name.
             </FieldDescription>
           </Field>
 
@@ -231,10 +262,7 @@ onMounted(load);
       <ul v-else-if="combos.length" class="divide-y divide-border">
         <li v-for="combo in combos" :key="combo.name" class="flex items-start gap-3 px-4 py-3">
           <div class="min-w-0 flex-1">
-            <div class="flex items-baseline gap-2">
-              <p class="font-mono text-xs text-foreground">{{ combo.name }}</p>
-              <span class="label-micro">{{ combo.strategy }}</span>
-            </div>
+            <p class="font-mono text-xs text-foreground">{{ combo.name }}</p>
             <ol class="mt-1.5 flex flex-col gap-0.5">
               <li
                 v-for="(member, index) in combo.members"
@@ -246,7 +274,36 @@ onMounted(load);
               </li>
             </ol>
           </div>
-          <div class="flex shrink-0 gap-1">
+          <div class="flex shrink-0 items-center gap-1">
+            <!--
+              Strategy is switchable here because it is the one field worth
+              changing on its own; membership still goes through the editor.
+            -->
+            <Select
+              :model-value="combo.strategy"
+              :disabled="switching.has(combo.name)"
+              @update:model-value="(value) => switchStrategy(combo, value)"
+            >
+              <SelectTrigger
+                class="h-8 w-44 text-xs"
+                :aria-label="`Strategy for ${combo.name}`"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="end" :side-offset="4">
+                <SelectGroup>
+                  <SelectItem
+                    v-for="option in strategies"
+                    :key="option.id"
+                    :value="option.id"
+                    class="text-xs"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+
             <Button variant="ghost" size="sm" @click="edit(combo)">Edit</Button>
             <Button
               variant="ghost"

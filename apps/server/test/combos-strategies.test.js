@@ -126,16 +126,41 @@ test('runOnce falls through to second member on retryable error', async () => {
 });
 
 test('runOnce throws immediately on non-retryable error', async () => {
+    // Only a mapping mistake or an unparseable body is final now. A bare provider
+    // 400 used to be treated as final too, on the assumption that every member
+    // would reject it identically — wrong once members span providers, where a
+    // retired id or a backend-specific schema rule surfaces the same way.
     const plan = makePlan('a', 'b');
     const combo = makeCombo('failover', 'fo-nonretryable');
     let calls = 0;
     const attempt = async () => {
         calls++;
-        throw new Error('400 invalid_request');
+        throw new Error('kiro does not serve model nope');
     };
 
-    await assert.rejects(() => runOnce(combo, plan, {}, attempt), /invalid_request/);
+    await assert.rejects(() => runOnce(combo, plan, {}, attempt), /does not serve model/);
     assert.equal(calls, 1, 'should not retry on non-retryable error');
+});
+
+test('runOnce moves past a provider 400 to the next member', async () => {
+    // The case that cost a working combo: member one was retired upstream and
+    // answered a plain 400, so the whole request failed with four healthy members
+    // left untried.
+    const plan = makePlan('retired', 'healthy');
+    const combo = makeCombo('failover', 'fo-provider-400');
+    const tried = [];
+    const attempt = async (member) => {
+        tried.push(member.modelId);
+        if (member.modelId === 'model-retired') {
+            throw new Error('Google API error 400: Request contains an invalid argument.');
+        }
+        return { ok: true };
+    };
+
+    const outcome = await runOnce(combo, plan, {}, attempt);
+    assert.deepEqual(outcome.result, { ok: true });
+    // Both were tried, in order, and the healthy one answered.
+    assert.deepEqual(tried, ['model-retired', 'model-healthy']);
 });
 
 test('runOnce throws after exhausting all members', async () => {

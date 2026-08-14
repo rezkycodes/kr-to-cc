@@ -11,6 +11,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { cleanSchemaForGemini, sanitizeFunctionName } from '../src/providers/google/schema.js';
+import {
+    GOOGLE_MODEL_SEED,
+    normalizeCatalogPayload,
+    replacementFor
+} from '../src/providers/google/models.js';
 import { buildGoogleRequest, deriveSessionId } from '../src/providers/google/request-builder.js';
 import {
     convertResponse,
@@ -420,4 +425,192 @@ test('Google quota is reported per account, per model', async () => {
             }
         }
     }
+});
+
+test('tool call ids travel with Anthropic- and OpenAI-backed models, not Gemini', () => {
+    // The Antigravity backend fronts three families that disagree about this, all
+    // confirmed live: Gemini rejects an `id` field outright, while Anthropic and
+    // the OpenAI-shaped backend both refuse the turn without one.
+    const conversation = {
+        max_tokens: 128,
+        tools: [{ name: 'get_time', input_schema: { type: 'object', properties: {} } }],
+        messages: [
+            { role: 'user', content: 'time?' },
+            {
+                role: 'assistant',
+                content: [{ type: 'tool_use', id: 'toolu_x1', name: 'get_time', input: {} }]
+            },
+            {
+                role: 'user',
+                content: [{ type: 'tool_result', tool_use_id: 'toolu_x1', content: '06:40' }]
+            }
+        ]
+    };
+
+    const partsFor = (model) => {
+        const { body } = buildGoogleRequest({ ...conversation, model }, { projectId: 'p' });
+        const contents = body.request.contents;
+        return {
+            call: contents.flatMap((c) => c.parts).find((p) => p.functionCall)?.functionCall,
+            result: contents.flatMap((c) => c.parts).find((p) => p.functionResponse)?.functionResponse
+        };
+    };
+
+    for (const model of ['claude-sonnet-4-6', 'gpt-oss-120b-medium']) {
+        const { call, result } = partsFor(model);
+        assert.equal(call.id, 'toolu_x1', `${model} must carry the tool_use id`);
+        assert.equal(result.id, 'toolu_x1', `${model} must carry the tool_result id`);
+    }
+
+    for (const model of ['gemini-3-flash', 'gemini-pro-agent']) {
+        const { call, result } = partsFor(model);
+        assert.equal(call.id, undefined, `${model} must not carry an id`);
+        assert.equal(result.id, undefined, `${model} must not carry an id`);
+        // The name is what Gemini pairs on, so it still has to be there.
+        assert.ok(call.name, 'the function name is required for Gemini');
+        assert.ok(result.name, 'the response name is required for Gemini');
+    }
+});
+
+test('a property given as a bare type name is coerced, not passed on', () => {
+    // Some tool servers emit {"paths": "array"} instead of {"paths": {"type":"array"}}.
+    // Gemini rejects the whole request with an index-based path that is hard to
+    // trace, so the intent is honoured here instead.
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: { path: { type: 'string' }, globs: 'array' }
+    });
+
+    assert.deepEqual(cleaned.properties.globs, { type: 'array', items: { type: 'string' } });
+    assert.deepEqual(cleaned.properties.path, { type: 'string' });
+});
+
+test('a property that is not a schema at all is dropped, and required follows', () => {
+    // Nothing can be salvaged from these, and leaving one in fails the whole tool
+    // set rather than the single property.
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: { junk: 'not-a-type', list: ['x'], nothing: null, keep: { type: 'string' } },
+        required: ['junk', 'keep']
+    });
+
+    assert.deepEqual(Object.keys(cleaned.properties), ['keep']);
+    // A required entry naming a dropped property would be rejected upstream.
+    assert.deepEqual(cleaned.required, ['keep']);
+});
+
+test('an array always ends up with items', () => {
+    // Gemini treats items as required on an array and rejects the declaration
+    // without it.
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: {
+            bare: { type: 'array' },
+            typed: { type: 'array', items: { type: 'number' } }
+        }
+    });
+
+    assert.deepEqual(cleaned.properties.bare.items, { type: 'string' });
+    // An existing items is left alone rather than replaced.
+    assert.deepEqual(cleaned.properties.typed.items, { type: 'number' });
+});
+
+test('the coercion reaches nested properties', () => {
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: {
+            outer: { type: 'object', properties: { inner: 'array' } }
+        }
+    });
+
+    assert.deepEqual(cleaned.properties.outer.properties.inner, {
+        type: 'array',
+        items: { type: 'string' }
+    });
+});
+
+test('a property named after a JSON Schema keyword is not corrupted', () => {
+    // This was the real failure. `properties` is keyed by names the tool author
+    // chose, and a generic walk treated the map as a schema: it saw `.items` (the
+    // property!), decided the map was an array, and injected `type: "array"` into
+    // it. Gemini then rejected the entire tool set, naming only
+    // `properties[1].value` — impossible to trace back from the message.
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: {
+            items: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Array of items'
+            }
+        },
+        required: ['items']
+    });
+
+    assert.deepEqual(Object.keys(cleaned.properties), ['items']);
+    // No injected sibling.
+    assert.equal(cleaned.properties.type, undefined);
+    assert.equal(cleaned.properties.items.type, 'array');
+    assert.deepEqual(cleaned.required, ['items']);
+});
+
+test('every schema keyword is safe to use as a property name', () => {
+    // Each of these previously risked a pass mistaking the properties map for a
+    // schema and rewriting it.
+    const names = ['type', 'items', 'enum', 'required', 'const', 'anyOf', 'oneOf', 'allOf', 'properties'];
+    const properties = {};
+    for (const name of names) properties[name] = { type: 'string', description: name };
+
+    const cleaned = cleanSchemaForGemini({ type: 'object', properties, required: [...names] });
+
+    assert.deepEqual(Object.keys(cleaned.properties).sort(), [...names].sort());
+    for (const name of names) {
+        assert.equal(cleaned.properties[name].type, 'string', `${name} should survive intact`);
+    }
+    assert.deepEqual(cleaned.required.sort(), [...names].sort());
+});
+
+test('cleaning still reaches schemas nested under keyword-named properties', () => {
+    // The walk must be keyword-aware without becoming shallow: a union inside a
+    // property named `items` still has to be flattened.
+    const cleaned = cleanSchemaForGemini({
+        type: 'object',
+        properties: {
+            items: {
+                type: 'array',
+                items: { type: ['string', 'null'] }
+            }
+        }
+    });
+
+    assert.equal(cleaned.properties.items.items.type, 'string');
+});
+
+test('a retired model is dropped from the catalog and its successor recorded', () => {
+    // The catalog lists retirements in `deprecatedModelIds` while still including
+    // the old id under `models`. The backend then rejects it with a bare
+    // "Request contains an invalid argument", so offering it is worse than useless.
+    const payload = {
+        models: {
+            'gemini-3.1-pro-high': { displayName: 'Gemini 3.1 Pro (High)', maxTokens: 100 },
+            'gemini-pro-agent': { displayName: 'Gemini Pro Agent', maxTokens: 100 }
+        },
+        deprecatedModelIds: {
+            'gemini-3.1-pro-high': { newModelId: 'gemini-pro-agent' }
+        }
+    };
+
+    const { models } = normalizeCatalogPayload(payload);
+    const ids = models.map((m) => m.id);
+
+    assert.equal(ids.includes('gemini-3.1-pro-high'), false, 'retired id must not be offered');
+    assert.equal(ids.includes('gemini-pro-agent'), true, 'its successor must still be listed');
+    // Remembered so a request naming the old id can be told what to use instead.
+    assert.equal(replacementFor('gemini-3.1-pro-high'), 'gemini-pro-agent');
+});
+
+test('the seed catalog does not offer the retired id either', () => {
+    // The seed is used whenever the live catalog cannot load, so leaving it there
+    // would reintroduce the failure exactly when the account is having trouble.
+    assert.equal(GOOGLE_MODEL_SEED.some((m) => m.id === 'gemini-3.1-pro-high'), false);
 });

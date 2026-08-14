@@ -102,7 +102,7 @@ export function buildToolNameMap(tools) {
  * Convert Anthropic content blocks to Gemini parts.
  * @returns {{parts: object[], hasToolResult: boolean}}
  */
-function convertContent(content, mapName) {
+function convertContent(content, mapName, withToolIds) {
     const parts = [];
     let hasToolResult = false;
 
@@ -129,7 +129,11 @@ function convertContent(content, mapName) {
 
             case 'tool_use':
                 parts.push({
-                    functionCall: { name: mapName(block.name), args: block.input || {} },
+                    functionCall: {
+                        ...(withToolIds && block.id ? { id: block.id } : {}),
+                        name: mapName(block.name),
+                        args: block.input || {}
+                    },
                     // Gemini 3+ rejects a functionCall with no signature, and the
                     // client never sends one back, so it is always backfilled.
                     thoughtSignature: DEFAULT_THOUGHT_SIGNATURE
@@ -146,8 +150,7 @@ function convertContent(content, mapName) {
                         : JSON.stringify(raw ?? null);
                 parts.push({
                     functionResponse: {
-                        // Anthropic identifies a result by tool_use_id, not by
-                        // name; the name is recovered by the caller's mapping.
+                        ...(withToolIds && block.tool_use_id ? { id: block.tool_use_id } : {}),
                         name: block._geminiName || 'tool',
                         response: { result: text }
                     }
@@ -194,12 +197,35 @@ function annotateToolResults(messages) {
  * Build the Gemini `contents` array from Anthropic messages.
  * @returns {object[]}
  */
-function buildContents(messages, mapName) {
+/**
+ * Whether tool call ids should travel with the request.
+ *
+ * The Antigravity backend fronts three families, and they disagree — all three
+ * behaviours were verified live against real accounts:
+ *
+ *   - `gemini-*` is served by Gemini, which pairs a result with its call by
+ *     function *name* and rejects an `id` field outright:
+ *     "Request contains an invalid argument".
+ *   - `claude-*` is served by Anthropic, which requires `tool_use.id`:
+ *     "messages.1.content.0.tool_use.id: Field required".
+ *   - `gpt-oss-*` is served by an OpenAI-shaped backend, which requires it too:
+ *     "Expected the 'id' of a(n) 'assistant' 'tool_calls' array element to be
+ *     populated".
+ *
+ * So the id is sent by default and withheld only for Gemini. Two of the three
+ * known backends need it, which makes sending it the safer default for a family
+ * that has not been seen yet.
+ */
+function sendsToolIds(model) {
+    return !(typeof model === 'string' && model.startsWith('gemini'));
+}
+
+function buildContents(messages, mapName, withToolIds) {
     annotateToolResults(messages);
     const contents = [];
 
     for (const message of messages || []) {
-        const { parts, hasToolResult } = convertContent(message?.content, mapName);
+        const { parts, hasToolResult } = convertContent(message?.content, mapName, withToolIds);
         if (parts.length === 0) continue;
 
         // A turn carrying a tool result must be `user`, even when Anthropic
@@ -263,7 +289,7 @@ export function buildGoogleRequest(request, context) {
     const model = request.model;
     const { outbound, inbound } = buildToolNameMap(request.tools);
 
-    const contents = buildContents(request.messages, outbound);
+    const contents = buildContents(request.messages, outbound, sendsToolIds(model));
     const tools = buildTools(request.tools, outbound);
     const system = systemText(request.system);
     const sessionId = deriveSessionId(request.messages);

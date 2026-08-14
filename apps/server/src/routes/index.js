@@ -13,8 +13,10 @@ import comboRouter from './combo.routes.js';
 import connectionRouter from './connection.routes.js';
 import kiroConnectRouter from './kiro-connect.routes.js';
 import providerModelRouter from './provider-model.routes.js';
+import usageRouter from './usage.routes.js';
 import oauthRouter from './oauth.routes.js';
 import configRouter from './config.routes.js';
+import piConfigRouter from './pi-config.routes.js';
 import apiRouter, { healthRouter } from './api.routes.js';
 import { messagesTelemetry, proxyAuth } from './v1.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -39,6 +41,7 @@ export function registerRoutes(app) {
     // top-level path so the redirect URI stays stable and guessable.
     app.use('/ui', connectionRouter);
     app.use('/ui', providerModelRouter);
+    app.use('/ui', usageRouter);
     app.use('/', connectionRouter);
 
     // Dashboard (main menu) + embeddable viewer pages — mounted at the root.
@@ -51,6 +54,7 @@ export function registerRoutes(app) {
 
     // Claude Code configuration UI/API (writes ~/.claude/settings.json).
     app.use('/config/claude', configRouter);
+    app.use('/config/pi', piConfigRouter);
 
     // Unversioned endpoint.
     app.use('/', healthRouter);

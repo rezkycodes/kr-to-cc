@@ -42,6 +42,14 @@ const RETRYABLE_PATTERNS = [
     /timeout/i,
     /capacity/i,
     /high traffic/i,
+    // A 400 from one member says nothing about the next when members sit on
+    // different providers. A retired Gemini id, a schema its backend will not
+    // accept, or a model pulled from a plan all surface as a bare 400 — and
+    // aborting the combo over it wasted four healthy members. Each member is still
+    // tried at most once, so the cost is bounded; if the request really is
+    // malformed every member rejects it and the last error is surfaced.
+    /\b400\b/,
+    /invalid.?argument/i,
     /overloaded/i,
     /not signed in/i,
     /not authenticated/i,
@@ -55,8 +63,18 @@ const RETRYABLE_PATTERNS = [
  */
 export function isRetryable(error) {
     const message = String(error?.message || '');
-    // A client mistake is final: every member would say the same.
-    if (/invalid[_ ]request|400|malformed|does not serve model/i.test(message)) return false;
+
+    // Final only where the next member genuinely cannot do better: a mapping
+    // mistake, or a body no backend could parse.
+    //
+    // A bare `400` used to be listed here on the assumption that every member
+    // would reject it identically. That assumption is wrong once members span
+    // providers — a retired Gemini id and a schema Gemini alone refuses both
+    // arrive as a plain 400, and treating them as final threw away four healthy
+    // members. The cost of being wrong the other way is bounded: each member is
+    // tried at most once, and if the request really is bad the last error surfaces.
+    if (/malformed|does not serve model/i.test(message)) return false;
+
     return RETRYABLE_PATTERNS.some((re) => re.test(message));
 }
 

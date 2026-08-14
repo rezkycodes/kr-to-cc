@@ -10,8 +10,8 @@
  * existing model.
  */
 
-import { resolveModel } from '../providers/index.js';
-import { COMBO_NAMESPACE, getCombo } from './store.js';
+import { listAllModels, resolveModel } from '../providers/index.js';
+import { COMBO_NAMESPACE, getCombo, listCombos } from './store.js';
 
 /**
  * @typedef {object} SingleTarget
@@ -137,3 +137,19 @@ export function comboModelEntries(combos) {
 }
 
 export default { resolveTarget, comboModelEntries };
+
+/**
+ * Everything a client may put in a `model` field: every provider's catalog plus
+ * the combos, which are presented as models so a client can select one without
+ * knowing it is a group.
+ *
+ * Both `/v1/models` and the Configure page read from here. They used to merge
+ * combos separately and the Configure page was missed, so combos could be created
+ * but not chosen — this exists so the two cannot drift apart again.
+ */
+export async function listSelectableModels() {
+    const models = await listAllModels();
+    const combos = comboModelEntries(listCombos());
+    if (combos.length > 0) models.data = [...models.data, ...combos];
+    return models;
+}

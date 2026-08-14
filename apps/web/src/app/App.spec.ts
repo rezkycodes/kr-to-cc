@@ -19,6 +19,8 @@ function testRouter() {
       { path: '/dashboard', component: blank, meta: { title: 'Monitor' } },
       { path: '/oauth/kiro', component: blank, meta: { title: 'Sign in' } },
       { path: '/config/claude', component: blank, meta: { title: 'Configure' } },
+      { path: '/providers', component: blank, meta: { title: 'Providers' } },
+      { path: '/usage', component: blank, meta: { title: 'Usage' } },
       // The real component, so the test proves the page actually renders on its
       // own route rather than only that the link exists.
       {
@@ -67,10 +69,12 @@ describe('app shell', () => {
     expect(links.map((link) => link.text())).toEqual([
       'Monitor',
       'Providers',
+      'Usage',
       'Configure',
       'Combos',
     ]);
-    expect(links[2].attributes('aria-current')).toBe('page');
+    // The router is on /config/claude, so Configure is the current section.
+    expect(links[3].attributes('aria-current')).toBe('page');
     expect(links[0].attributes('aria-current')).toBeUndefined();
 
     wrapper.unmount();

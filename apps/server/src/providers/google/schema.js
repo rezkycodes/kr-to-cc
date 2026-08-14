@@ -32,15 +32,53 @@ const UNSUPPORTED_KEYWORDS = [
 ];
 
 /** Walk every nested object/array in a schema. */
+/**
+ * Keywords whose value is a map of *caller-chosen names* to schemas. The map
+ * itself is not a schema and must never be visited as one.
+ */
+const SCHEMA_MAPS = ['properties', 'patternProperties', '$defs', 'definitions'];
+
+/** Keywords whose value is a single schema. */
+const SCHEMA_VALUES = ['items', 'additionalItems', 'additionalProperties', 'contains', 'not'];
+
+/** Keywords whose value is a list of schemas. */
+const SCHEMA_LISTS = ['anyOf', 'oneOf', 'allOf', 'prefixItems'];
+
+/**
+ * Visit every schema node, and only schema nodes.
+ *
+ * This has to be keyword-aware rather than walking every object it finds. A
+ * `properties` map is keyed by names the tool author chose, and those names
+ * collide with JSON Schema keywords: a tool with a property called `items` used to
+ * make the generic walk treat the map as a schema, so `ensureObjectType` saw
+ * `node.items` and injected `type: "array"` *into the map* — producing a bogus
+ * property named `type` whose value was the string `"array"`. Gemini then rejected
+ * the entire tool set, naming only `properties[1].value`.
+ *
+ * Properties named `type`, `enum`, `required`, `const` and so on were corrupted the
+ * same way.
+ */
 function walk(node, visit) {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
     visit(node);
-    for (const value of Object.values(node)) {
-        if (Array.isArray(value)) {
-            for (const item of value) walk(item, visit);
-        } else if (value && typeof value === 'object') {
-            walk(value, visit);
-        }
+
+    for (const keyword of SCHEMA_MAPS) {
+        const map = node[keyword];
+        if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+        // Values only: the map's keys are names, not keywords.
+        for (const child of Object.values(map)) walk(child, visit);
+    }
+
+    for (const keyword of SCHEMA_VALUES) {
+        const child = node[keyword];
+        if (child && typeof child === 'object' && !Array.isArray(child)) walk(child, visit);
+        // `items` may also be a tuple of schemas in older drafts.
+        else if (Array.isArray(child)) for (const item of child) walk(item, visit);
+    }
+
+    for (const keyword of SCHEMA_LISTS) {
+        const list = node[keyword];
+        if (Array.isArray(list)) for (const item of list) walk(item, visit);
     }
 }
 
@@ -194,6 +232,54 @@ function pruneRequired(schema) {
  * @param {object} schema JSON Schema; not mutated
  * @returns {object} a cleaned deep copy
  */
+/** The scalar types Gemini's Schema accepts. */
+const SCHEMA_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'array', 'object']);
+
+/**
+ * Coerce a property whose schema is a bare type name.
+ *
+ * Some tool servers emit `{"properties": {"paths": "array"}}` instead of
+ * `{"properties": {"paths": {"type": "array"}}}`. JSON Schema does not allow it,
+ * and Gemini rejects the whole request with
+ * `Invalid value at ...properties[1].value (...Schema), "array"` — which names an
+ * index, not the property, so it is unusually hard to trace back. Coerced here
+ * rather than passed on, since the intent is unambiguous.
+ *
+ * A value that is not a known type name is dropped: there is nothing to salvage,
+ * and leaving it in fails the entire tool set rather than one property.
+ */
+function coercePropertySchemas(schema) {
+    walk(schema, (node) => {
+        if (!node.properties || typeof node.properties !== 'object') return;
+        for (const [key, value] of Object.entries(node.properties)) {
+            if (typeof value === 'string') {
+                if (SCHEMA_TYPES.has(value)) node.properties[key] = { type: value };
+                else delete node.properties[key];
+            } else if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                // Arrays and primitives are not schemas either.
+                delete node.properties[key];
+            }
+        }
+    });
+}
+
+/**
+ * Give every array an `items`.
+ *
+ * Gemini's Schema treats `items` as required on an array; without it the
+ * declaration is rejected. A permissive string item is the least assuming filler
+ * — the alternative is dropping the property, which would silently remove a
+ * parameter the tool expects.
+ */
+function ensureArrayItems(schema) {
+    walk(schema, (node) => {
+        if (node.type === 'array' && (!node.items || typeof node.items !== 'object')) {
+            node.items = { type: 'string' };
+        }
+    });
+}
+
+
 export function cleanSchemaForGemini(schema) {
     if (!schema || typeof schema !== 'object') {
         return { type: 'object', properties: {} };
@@ -201,6 +287,9 @@ export function cleanSchemaForGemini(schema) {
 
     const cleaned = structuredClone(schema);
 
+    // First: a property that is a bare type name is not a schema at all, and the
+    // passes below assume they are walking schemas.
+    coercePropertySchemas(cleaned);
     constToEnum(cleaned);
     enumValuesToStrings(cleaned);
     mergeAllOf(cleaned);
@@ -208,6 +297,9 @@ export function cleanSchemaForGemini(schema) {
     flattenTypeArrays(cleaned);
     ensureObjectType(cleaned);
     removeUnsupported(cleaned);
+    // After type inference, so an array discovered from `items` is not given a
+    // second one.
+    ensureArrayItems(cleaned);
     pruneRequired(cleaned);
 
     // A function's parameters must be an object schema.

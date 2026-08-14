@@ -9,6 +9,7 @@ const props = defineProps<{ state: GatewayState }>();
 const links = [
   { to: '/dashboard', label: 'Monitor' },
   { to: '/providers', label: 'Providers' },
+  { to: '/usage', label: 'Usage' },
   { to: '/config/claude', label: 'Configure' },
   { to: '/combos', label: 'Combos' },
 ];

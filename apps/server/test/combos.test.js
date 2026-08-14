@@ -427,3 +427,125 @@ test('every strategy is reachable by name', () => {
         assert.ok(order.length >= 1, `${strategy} must produce an order`);
     }
 });
+
+test('a combo name may carry a dotted version', () => {
+    // Model ids use dots (minimax-m2.5, deepseek-3.2, and every Kiro upstream id
+    // such as claude-sonnet-4.6), so the naming rule has to allow them or it
+    // contradicts the catalog it is validated against.
+    assert.deepEqual(
+        validateCombo({
+            name: 'sonnet-pool-4.6',
+            strategy: 'failover',
+            members: [{ model: 'auto' }]
+        }),
+        []
+    );
+});
+
+test('a dotted name that is a Kiro upstream alias is refused as a combo name', () => {
+    // claude-sonnet-4.6 is the upstream id behind claude-sonnet-4-6, so it already
+    // resolves to a model. Letting a combo take it would shadow that model.
+    assert.match(
+        validateCombo({
+            name: 'claude-sonnet-4.6',
+            strategy: 'failover',
+            members: [{ model: 'auto' }]
+        }).join(' '),
+        /already a model/
+    );
+});
+
+test('a combo name still cannot start or end with a separator', () => {
+    // Guards the path-ish shapes: a bare traversal, and dangling separators.
+    for (const bad of ['..', '.combo', 'combo.', '-combo', 'combo-', 'a/b']) {
+        assert.ok(
+            validateCombo({ name: bad, strategy: 'failover', members: [{ model: 'auto' }] }).length > 0,
+            `expected "${bad}" to be rejected`
+        );
+    }
+});
+
+test('a dotted combo name that matches a real model is still refused', () => {
+    // Widening the pattern must not open a way to shadow a catalog entry.
+    assert.match(
+        validateCombo({ name: 'minimax-m2.5', strategy: 'failover', members: [{ model: 'auto' }] }).join(' '),
+        /already a model/
+    );
+});
+
+test('the selectable model list carries combos alongside provider models', async () => {
+    // The Configure page and /v1/models both read this one list. They used to
+    // merge combos separately and the Configure page was missed, so a combo could
+    // be created but never chosen. One source means they cannot disagree again.
+    const { listSelectableModels } = await import('../src/combos/resolver.js');
+
+    const before = await listSelectableModels();
+    const beforeIds = before.data.map((m) => m.id);
+    assert.ok(before.object === 'list', 'expected the list envelope to survive');
+
+    saveCombo({
+        name: 'selectable-check',
+        strategy: 'failover',
+        members: [{ model: 'auto' }, { model: 'claude-sonnet-5' }]
+    });
+
+    try {
+        const after = await listSelectableModels();
+        const entry = after.data.find((m) => m.id === 'selectable-check');
+        assert.ok(entry, 'expected the combo to appear as a selectable model');
+        // Tagged so a caller can group or filter combos without guessing.
+        assert.equal(entry.provider, 'combo');
+        // Provider models are still all there.
+        for (const id of beforeIds) {
+            assert.ok(after.data.some((m) => m.id === id), `lost provider model ${id}`);
+        }
+    } finally {
+        deleteCombo('selectable-check');
+    }
+});
+
+test('a combo target exposes its members as `plan`', () => {
+    // The route reads target.plan to log and dispatch. Writing target.members
+    // instead crashed every combo request through the OpenAI endpoint, and the
+    // translator tests could not catch it because they never touch the route.
+    saveCombo({
+        name: 'shape-check',
+        strategy: 'failover',
+        members: [{ model: 'auto' }, { model: 'claude-sonnet-5' }]
+    });
+
+    try {
+        const target = resolveTarget('shape-check');
+        assert.equal(target.kind, 'combo');
+        assert.ok(Array.isArray(target.plan), 'members live on `plan`');
+        assert.equal(target.plan.length, 2);
+        assert.equal(target.combo.strategy, 'failover');
+        // Named explicitly: anything reading target.members gets undefined and
+        // throws on .length.
+        assert.equal(target.members, undefined);
+    } finally {
+        deleteCombo('shape-check');
+    }
+});
+
+test('a provider 400 lets the combo try the next member', () => {
+    // This cost a working combo. `gemini-3.1-pro-high` was retired upstream and
+    // answers a bare 400; the old rule treated any 400 as final on the assumption
+    // that every member would reject it identically. Members span providers, so
+    // that assumption does not hold — four healthy members were thrown away.
+    assert.equal(isRetryable(new Error('Google API error 400: Request contains an invalid argument.')), true);
+    assert.equal(isRetryable(new Error('Google API error 400: Invalid value at ...Schema, "array"')), true);
+});
+
+test('a mapping mistake is still final', () => {
+    // No other member can do better with these, so retrying only wastes quota.
+    assert.equal(isRetryable(new Error('kiro does not serve model nope')), false);
+    assert.equal(isRetryable(new Error('malformed request body')), false);
+});
+
+test('quota errors remain retryable', () => {
+    // Guards the original purpose of the list while the 400 rule changed around it.
+    assert.equal(isRetryable(new Error('Kiro API error 402: You have reached the limit.')), true);
+    assert.equal(isRetryable(new Error('Google quota exhausted (HTTP 429)')), true);
+    assert.equal(isRetryable(new Error('Token refresh failed: HTTP 401')), true);
+});

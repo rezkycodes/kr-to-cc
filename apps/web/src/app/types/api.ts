@@ -181,6 +181,8 @@ export interface ClaudeConfigState {
   error?: string | null;
   current: Partial<ClaudeConfigValues> | null;
   models: string[];
+  /** Which of `models` are combos, so the picker can group them. */
+  combos?: string[];
   suggestedBaseUrl: string;
   /** Server verdict: does the base URL on disk already reach this gateway? */
   pointsHere: boolean;

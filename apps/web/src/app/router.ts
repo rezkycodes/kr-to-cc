@@ -28,6 +28,12 @@ export const router = createRouter({
       meta: { title: 'Providers' },
     },
     {
+      path: '/usage',
+      name: 'usage',
+      component: () => import('./pages/UsagePage.vue'),
+      meta: { title: 'Usage' },
+    },
+    {
       path: '/combos',
       name: 'combos',
       component: () => import('./pages/CombosPage.vue'),

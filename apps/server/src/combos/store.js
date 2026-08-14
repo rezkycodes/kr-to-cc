@@ -32,8 +32,18 @@ export const COMBO_STRATEGIES = ['failover', 'load-balance', 'router', 'race'];
 /** Namespace combos live under, mirroring the provider namespace. */
 export const COMBO_NAMESPACE = 'combo';
 
-/** Names must be safe to embed in a model id. */
-const NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$|^[a-z0-9]{1,2}$/;
+/**
+ * Names must be safe to embed in a model id.
+ *
+ * Dots are allowed because real model ids use them — `minimax-m2.5`,
+ * `deepseek-3.2`, `gemini-3.1-pro-low` — so a combo named after a version would
+ * otherwise be rejected for looking exactly like the models it groups.
+ *
+ * Start and end are restricted to alphanumerics, which keeps out a bare `..` and
+ * any leading or trailing separator. `/` stays excluded: it is the separator
+ * between a provider and a model id.
+ */
+const NAME_PATTERN = /^[a-z0-9][a-z0-9.-]{0,38}[a-z0-9]$|^[a-z0-9]{1,2}$/;
 
 /** Overridden by tests so they never touch the real config. */
 let storeOverride = null;
@@ -111,7 +121,10 @@ export function validateCombo(definition, options = {}) {
     if (!name) {
         problems.push('A combo name is required.');
     } else if (!NAME_PATTERN.test(name)) {
-        problems.push('Name may use lowercase letters, digits, and hyphens, and cannot start or end with a hyphen.');
+        problems.push(
+            'Name may use lowercase letters, digits, dots, and hyphens, and must start '
+            + 'and end with a letter or digit.'
+        );
     } else {
         // A combo that shadows a provider slug would make `provider/model` ambiguous.
         if (getProvider(name)) {

@@ -29,6 +29,71 @@ A proxy server that exposes an **Anthropic-compatible API** backed by **Kiro's A
 - **Realtime monitor** (`/dashboard`) — live traffic trace over SSE, plus per-model and failure breakdowns
 - **Live model checker** (`/v1/models/check`) — probe which models are actually active
 
+## Clients that speak OpenAI
+
+Besides the Anthropic route, the gateway exposes **`POST /v1/chat/completions`** in
+OpenAI shape, with streaming and tool calling. Combos, account rotation, quota
+parking, and telemetry all apply the same way — it is a translation layer over the
+same pipeline, not a second one.
+
+Three places the two formats do not line up, handled rather than ignored:
+
+- OpenAI carries system prompts inside `messages`; Anthropic takes one top-level
+  `system` string, so several are joined.
+- OpenAI has a `tool` role for results; Anthropic puts a `tool_result` block on a
+  **user** turn.
+- Tool arguments are a JSON *string* in OpenAI and an object in Anthropic. A
+  malformed string is passed through as `_raw_arguments` rather than dropped, so the
+  model can see what it produced.
+
+`thinking` deltas are not forwarded: OpenAI has no field for them.
+
+**Tool schemas are repaired before they reach Gemini**, whose `Schema` type is a
+subset of JSON Schema. Union types, `anyOf`, `const`, and `$ref` are already
+collapsed; two shapes that agent frameworks emit are also handled, because Gemini
+rejects the *entire* tool set over one of them and names only an array index in the
+error:
+
+- A property given as a bare type name — `{"globs": "array"}` instead of
+  `{"globs": {"type": "array"}}` — is coerced. A value that is not a schema at all
+  is dropped, and any `required` entry naming it is dropped with it.
+- An array without `items` is given a permissive one, since Gemini treats `items` as
+  required.
+
+The cleaning is **keyword-aware about where schemas live**, which matters more than
+it sounds. A `properties` map is keyed by names the tool author chose, and those
+names collide with JSON Schema keywords — a tool with a property called `items` or
+`type` is perfectly legal. Walking every nested object as if it were a schema
+corrupts those maps, and Gemini then rejects the whole tool set while naming only an
+array index.
+
+### Pi Agent
+
+[Pi Agent](https://github.com/parcelvoy/pi) reads `~/.pi/agent/models.json` and
+declares each backend as a provider. Write this gateway into it:
+
+```bash
+curl -X POST http://localhost:4000/config/pi/apply \
+  -H 'Content-Type: application/json' -d '{"baseUrl":"http://localhost:4000/v1"}'
+```
+
+That merges a `krcc` provider using `"api": "openai-completions"` and leaves every
+other provider in the file untouched, writing a timestamped backup first. A file that
+cannot be parsed is refused rather than overwritten, since it holds your other
+backends.
+
+What it declares, and why it may look conservative:
+
+- **Reasoning** is marked where it is known: Google flags it per model, and Kiro
+  publishes the reasoning variant as its own `-thinking` id. Both are honoured.
+- **Image input is claimed only when the provider reports it.** Kiro reports nothing
+  here and Google only in its live catalog, so a model is listed as text-only unless
+  proven otherwise — claiming otherwise would make Pi Agent send an image the
+  upstream then rejects.
+- **A provider that cannot be reached contributes no models**, and the response says
+  which, so a partial config is visible instead of you finding half the catalog
+  missing later.
+
 ## Prerequisites
 
 - **Node.js 20.19 or later**
@@ -242,6 +307,10 @@ claude
 |----------|--------|-------------|
 | `/health` | GET | Health check |
 | `/v1/messages` | POST | Anthropic Messages API (streaming + non-streaming) |
+| `/v1/chat/completions` | POST | OpenAI Chat Completions API (streaming + non-streaming) |
+| `/config/pi/state` | GET | What is in `~/.pi/agent/models.json`, and what would be written |
+| `/config/pi/apply` | POST | Merge this gateway into Pi Agent's model config |
+| `/config/pi` | DELETE | Remove this gateway's block from that config |
 | `/v1/models` | GET | List available models |
 | `/v1/models/check` | GET/POST | Probe which models are actually active (1 tiny request/model) |
 | `/v1/messages/count_tokens` | POST | Heuristic token count estimate |
@@ -249,6 +318,8 @@ claude
 | `/ui/combos/:name` | GET/DELETE | Read or delete one combo |
 | `/ui/providers/:id/models` | GET | That provider's models, with quota |
 | `/ui/providers/:id/models/:model/test` | POST | Send one tiny request to that model |
+| `/ui/usage` | GET | Usage history: totals, per provider, per model, per day |
+| `/ui/usage` | DELETE | Forget the stored usage counters |
 | `/ui/telemetry/data` | GET | Telemetry snapshot as JSON |
 | `/ui/telemetry/stream` | GET | Server-Sent Events telemetry stream (see below) |
 
@@ -263,6 +334,7 @@ Three pages, each with its own layout:
 | `/config/claude` | **Configure** — edit Claude Code env values with a live JSON preview |
 | `/providers` | **Providers** — accounts per provider: add, enable, reorder, test, remove; plus that provider's models with quota and a per-model test |
 | `/combos` | **Combos** — build and edit combos, with the strategy and member order side by side |
+| `/usage` | **Usage** — which provider served your traffic, over days rather than the live window |
 
 ### Providers and accounts
 
@@ -312,7 +384,10 @@ flattening them would mislead:
 
 - **Google/Antigravity meters per model — and per account.** Each account holds its
   own set of model allowances, so the page shows an account picker and the rows
-  report the selected account's remaining fraction and reset time. Merging accounts
+  report the selected account's remaining fraction and reset time. Above the list a
+  summary gives the lowest remaining figure and which model holds it, plus how many
+  models are untouched, partly used, or exhausted, and the soonest reset. There is
+  deliberately no total: a per-model provider has no single allowance to total. Merging accounts
   would invent a total that no single account has. The account's plan comes from
   Code Assist (`Gemini Code Assist` for a standard tier); Antigravity often omits
   `currentTier`, so the default allowed tier is used and reported as unknown when
@@ -335,6 +410,15 @@ Two limitations worth knowing:
 - **A thinking model can spend its whole budget on thought** and return no text. The
   test allows enough headroom to clear reasoning and still answer, but a pass with an
   empty reply is reported as such rather than counted as a failure.
+- **Retired models are dropped from the catalog.** Antigravity keeps a deprecated id
+  in its model list while the backend rejects it with a bare "Request contains an
+  invalid argument". The catalog names the successor, so the old id is filtered out
+  and the replacement recorded — `gemini-3.1-pro-high` became `gemini-pro-agent`.
+- **Antigravity fronts three model families that disagree about tool calls.**
+  `gemini-*` pairs a tool result with its call by function name and rejects an `id`
+  field; `claude-*` is served by Anthropic and requires `tool_use.id`; `gpt-oss-*` is
+  OpenAI-shaped and requires an id too. The proxy sends the id for everything except
+  Gemini, so a tool-using conversation works on all three.
 
 `GOOGLE_STICKY_REQUESTS` and `KIRO_STICKY_REQUESTS` (both default `1`) set how many consecutive requests one
 account serves before rotating. Rotating on every single request defeats upstream
@@ -347,8 +431,14 @@ whether a refresh token exists.
 ### Combos
 
 A combo groups models from any provider under one name and appears in
-`GET /v1/models`, so a client can select it without knowing it is a group. Manage
+`GET /v1/models`, so a client can select it without knowing it is a group. It also
+appears in the **Configure** page's model pickers, grouped under *Combos* above the
+provider models, since a combo is a valid value to write into `settings.json`. Manage
 them on the **Combos** page (`/combos`) or via `GET`/`POST`/`DELETE /ui/combos`.
+
+The strategy is switchable straight from the combo list, so changing how an
+existing combo behaves does not mean reopening the editor; membership and order
+still go through **Edit**.
 
 Four strategies, chosen per combo:
 
@@ -367,8 +457,12 @@ Notes worth knowing before relying on them:
   before the first event. If a member dies mid-stream the request fails rather
   than silently restarting on another model, which would send the client
   overlapping messages.
-- **Only quota and transient errors trigger a retry.** A malformed request fails
-  immediately, since every member would reject it identically.
+- **A failure on one member moves to the next, including a bare `400`.** That was
+  once treated as final, on the assumption every member would reject it identically
+  — wrong once members span providers, where a model retired upstream or a schema
+  rule only one backend enforces surfaces as an undetailed 400. Each member is still
+  tried at most once. Only a mapping mistake (`does not serve model`) or an
+  unparseable body is final.
 - **`race` streaming uses the first member only** — a stream has to commit before
   latency is known.
 - Combos cannot contain other combos, and cannot take the name of an existing
@@ -376,6 +470,28 @@ Notes worth knowing before relying on them:
 
 The Monitor page attributes traffic to the member that actually answered, not to
 the combo, so `by_provider` reflects real upstream load.
+
+### Usage history
+
+The Monitor page draws a realtime trace from memory, which keeps six hours and is
+lost on restart. That cannot answer "which provider served my traffic this week", so
+usage is also rolled up to disk and shown on the **Usage** page (`/usage`).
+
+What is stored is deliberately narrow: **counters only**, bucketed per UTC day per
+served provider and model — requests, successes, failures, tokens, credits, total
+latency, and a `last_used`. No prompts, no responses, no request ids. Losing the file
+leaks nothing about what was asked. It lives at
+`~/.config/kiro-proxy/usage.json` with `0600` permissions and is kept 90 days.
+
+Attribution is on **who served** the request, not what was asked for, so a combo's
+traffic lands against the member that actually answered.
+
+Two things the page states rather than hides:
+
+- **Individual requests come from the live window**, not the rollups, so that list
+  is short and resets when the proxy restarts. The aggregate figures do not.
+- **Token counts are measured for Google and estimated for Kiro**, so a window
+  covering both is labelled *part estimated* rather than presented as exact.
 
 ### Telemetry stream (`GET /ui/telemetry/stream`)
 

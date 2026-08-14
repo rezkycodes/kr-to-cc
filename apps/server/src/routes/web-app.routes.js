@@ -22,7 +22,7 @@ router.use('/geist', express.static(join(webBuildDirectory, 'geist'), immutableS
 // prefixes (/oauth/kiro/status, /config/claude/state, …) stay with their JSON
 // routers, and each entry falls through to the server-rendered page when the
 // frontend has not been built.
-const APP_ROUTES = ['/', '/dashboard', '/oauth/kiro', '/config/claude', '/combos', '/providers'];
+const APP_ROUTES = ['/', '/dashboard', '/oauth/kiro', '/config/claude', '/combos', '/providers', '/usage'];
 
 router.get(APP_ROUTES, (req, res, next) => {
     if (!existsSync(webIndexPath)) return next();

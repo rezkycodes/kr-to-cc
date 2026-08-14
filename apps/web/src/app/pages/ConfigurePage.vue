@@ -4,7 +4,7 @@
  * form; the right column is the exact env block that will be merged into
  * ~/.claude/settings.json, so the outcome is visible before saving.
  */
-import { onMounted } from 'vue';
+import { computed, onMounted } from 'vue';
 import { CheckIcon, CopyIcon, RotateCcwIcon } from '@lucide/vue';
 import StatusPip from '../components/StatusPip.vue';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,6 +16,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -29,6 +30,15 @@ const { form, state, loading, saving, result, pointsHere, baseUrlIssue, previewJ
   useClaudeConfig();
 
 onMounted(load);
+
+/** Combos, which the server names separately so they can be grouped. */
+const comboModels = computed(() => state.value?.combos ?? []);
+
+/** Everything that is not a combo, in catalog order. */
+const plainModels = computed(() => {
+  const combos = new Set(comboModels.value);
+  return (state.value?.models ?? []).filter((id) => !combos.has(id));
+});
 
 const ALIASES: { key: keyof ClaudeConfigValues; label: string; role: string }[] = [
   { key: 'opusModel', label: 'Opus', role: 'deep reasoning' },
@@ -130,9 +140,23 @@ function pick(key: keyof ClaudeConfigValues, value: unknown) {
                     align against and the panel lands at the viewport's left edge.
                   -->
                   <SelectContent position="popper" align="end" :side-offset="4">
-                    <SelectGroup>
+                    <!-- Combos first and labelled: they are few, user-made, and
+                         otherwise lost at the end of forty-odd model ids. -->
+                    <SelectGroup v-if="comboModels.length">
+                      <SelectLabel>Combos</SelectLabel>
                       <SelectItem
-                        v-for="model in state?.models ?? []"
+                        v-for="model in comboModels"
+                        :key="model"
+                        :value="model"
+                        class="font-mono text-xs"
+                      >
+                        {{ model }}
+                      </SelectItem>
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel v-if="comboModels.length">Models</SelectLabel>
+                      <SelectItem
+                        v-for="model in plainModels"
                         :key="model"
                         :value="model"
                         class="font-mono text-xs"

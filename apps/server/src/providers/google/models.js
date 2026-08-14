@@ -24,11 +24,13 @@ import { logger } from '../../utils/logger.js';
  * per-token price for this API, so the weight is a coarse relative hint, in the
  * same spirit as Kiro's credit multiplier — not a billing figure.
  */
+// Retired ids are deliberately absent: the live catalog reports
+// `gemini-3.1-pro-high` as replaced by `gemini-pro-agent`, and the backend rejects
+// the old id with a bare "Request contains an invalid argument".
 export const GOOGLE_MODEL_SEED = [
     { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash (High)', contextWindow: 1048576, costWeight: 0.5, thinking: true },
     { id: 'gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash (Medium)', contextWindow: 1048576, costWeight: 0.4, thinking: true },
     { id: 'gemini-3.6-flash-low', label: 'Gemini 3.6 Flash (Low)', contextWindow: 1048576, costWeight: 0.3, thinking: true },
-    { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro (High)', contextWindow: 1048576, costWeight: 1.5, thinking: true },
     { id: 'gemini-3.1-pro-low', label: 'Gemini 3.1 Pro (Low)', contextWindow: 1048576, costWeight: 1.0, thinking: true },
     { id: 'gemini-pro-agent', label: 'Gemini 3.1 Pro (Agent)', contextWindow: 1048576, costWeight: 1.5, thinking: true },
     { id: 'gemini-3.5-flash-low', label: 'Gemini 3.5 Flash (Medium)', contextWindow: 1048576, costWeight: 0.4, thinking: true },
@@ -72,6 +74,19 @@ const CATALOG_TTL_MS = 5 * 60 * 1000;
  * @param {string} projectId
  * @returns {Promise<{models: object[], defaultModelId: string|null}>}
  */
+/**
+ * Deprecated id -> its successor, as reported by the catalog.
+ *
+ * Kept so a request naming a retired model gets told what to use instead of a
+ * generic 400 from the upstream.
+ */
+const replacements = new Map();
+
+/** The successor for a retired model id, or undefined if it is not retired. */
+export function replacementFor(modelId) {
+    return replacements.get(modelId);
+}
+
 export async function fetchAvailableModels(accessToken, projectId) {
     const response = await fetch(endpoints.fetchAvailableModels(), {
         method: 'POST',
@@ -95,11 +110,36 @@ export async function fetchAvailableModels(accessToken, projectId) {
 
     const payload = await response.json();
     // `models` is a map of id -> metadata, not an array.
-    const raw = payload.models || {};
+    return normalizeCatalogPayload(payload);
+}
+
+/**
+ * Turn a `fetchAvailableModels` payload into catalog entries.
+ *
+ * Separated from the request so the parsing — which is where the surprises live —
+ * can be tested without a network or an account.
+ *
+ * @param {object} payload the raw response
+ * @returns {{models: object[], defaultModelId: string|null}}
+ */
+export function normalizeCatalogPayload(payload) {
+const raw = payload.models || {};
     const entries = Array.isArray(raw) ? raw.map((m) => [m.modelId, m]) : Object.entries(raw);
+
+    // The catalog names its own retirements and their successors. A deprecated id
+    // is still listed in `models` but the backend rejects it with a bare
+    // "Request contains an invalid argument", which says nothing about why — so it
+    // is dropped here and the replacement remembered for the error message.
+    const deprecated = payload.deprecatedModelIds && typeof payload.deprecatedModelIds === 'object'
+        ? payload.deprecatedModelIds
+        : {};
+    for (const [id, info] of Object.entries(deprecated)) {
+        replacements.set(id, info?.newModelId || null);
+    }
 
     const models = [];
     for (const [id, meta] of entries) {
+        if (Object.hasOwn(deprecated, id)) continue;
         if (isInternalModel(id, meta)) continue;
         models.push({
             id,
@@ -203,6 +243,9 @@ export function listModels() {
             cost_multiplier: m.costWeight ?? null,
             status: 'active',
             thinking: m.thinking === true,
+            // Surfaced so a client config can declare image input honestly rather
+            // than guessing. Absent elsewhere, which callers read as text-only.
+            supports_images: m.supportsImages === true,
             quota_remaining: m.quotaRemaining ?? null,
             quota_reset_at: m.quotaResetAt ?? null
         }))

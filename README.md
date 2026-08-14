@@ -619,6 +619,8 @@ kiro-to-claude start --debug
 - `REQUEST_BODY_LIMIT` - Express JSON body limit (default: `10mb`).
 - `UPSTREAM_TIMEOUT_MS` - Kiro request/stream timeout in milliseconds (default: `300000`).
 - `DEBUG` - Enable debug logging (set to `true`).
+- `GOOGLE_OAUTH_CLIENT_ID` - Google OAuth client ID for Google provider connections.
+- `GOOGLE_OAUTH_CLIENT_SECRET` - Google OAuth client secret for Google provider connections.
 
 The proxy binds to localhost by default because it can consume your Kiro quota and
 its management UI can update local Claude Code settings. If you intentionally

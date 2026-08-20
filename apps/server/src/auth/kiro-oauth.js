@@ -312,9 +312,10 @@ async function readSsoCacheCandidates() {
 }
 
 /**
- * Discover ALL local Kiro credential sources: the Kiro CLI database plus every
- * token in the AWS SSO cache (Kiro IDE, Kiro CLI, etc.). Duplicate refresh
- * tokens are de-duplicated, keeping the first (highest-priority) source.
+ * Discover ALL local Kiro credential sources: the Kiro CLI database only.
+ * (AWS SSO cache / Kiro IDE imports are intentionally not read, so the proxy
+ * relies solely on `kiro auth` in the Kiro CLI.) Duplicate refresh tokens are
+ * de-duplicated, keeping the first (highest-priority) source.
  * @returns {Promise<Object[]>} Array of credential candidates with metadata
  */
 export async function discoverAllCredentialSources() {
@@ -324,9 +325,6 @@ export async function discoverAllCredentialSources() {
     if (cliDb) {
         sources.push({ ...cliDb, label: 'Kiro CLI (database)' });
     }
-
-    const ssoCandidates = await readSsoCacheCandidates();
-    sources.push(...ssoCandidates);
 
     // De-duplicate by refresh token, preserving order/priority.
     const seen = new Set();

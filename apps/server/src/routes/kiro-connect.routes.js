@@ -36,7 +36,7 @@ const METHODS = [
     {
         id: 'local',
         title: 'Import from this machine',
-        description: 'Use a login the Kiro CLI or Kiro IDE already has.',
+        description: 'Use a login the Kiro CLI already has.',
         icon: 'download',
         available: true
     },
@@ -45,13 +45,6 @@ const METHODS = [
         title: 'Google / GitHub login',
         description: 'Sign in through Kiro in your browser.',
         icon: 'globe',
-        available: true
-    },
-    {
-        id: 'token',
-        title: 'Import token',
-        description: 'Paste a refresh token from the Kiro IDE.',
-        icon: 'upload',
         available: true
     },
     {
@@ -78,7 +71,7 @@ const METHODS = [
         icon: 'building',
         available: false,
         unavailableReason:
-            'Not implemented in this build. An IDC login imported from the Kiro CLI or IDE does '
+            'Not implemented in this build. An IDC login imported from the Kiro CLI does '
             + 'work — use "Import from this machine".'
     },
     {

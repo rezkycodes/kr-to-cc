@@ -11,6 +11,10 @@
  * without notice.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
 /**
  * Chat traffic host.
  *
@@ -45,11 +49,39 @@ export const ANTIGRAVITY_USER_AGENT = `antigravity/ide/${ANTIGRAVITY_IDE_VERSION
  * Public OAuth client shipped inside the Antigravity desktop app.
  *
  * "Secret" only nominally — it is distributed in the binary, which is how desktop
- * OAuth clients work. Present here because refreshing a token requires it.
+ * OAuth clients work. It is needed to refresh tokens and to complete the browser
+ * sign-in flow (connections/google-oauth.js).
+ *
+ * The clientId is the Antigravity CLI client (taken verbatim from 9router's
+ * `open-sse/providers/shared.js`, `ANTIGRAVITY_OAUTH_CLIENT`) so a browser
+ * sign-in here mints the same kind of token the Antigravity CLI already stores
+ * in ~/.gemini/antigravity-cli/ — i.e. refreshable by these same credentials.
+ *
+ * The clientSecret is NOT committed: GitHub secret scanning blocks the push
+ * because it matches the Google OAuth client secret pattern, even though the
+ * value is public (shipped in the Antigravity binary). It is read from, in
+ * order: the GOOGLE_OAUTH_CLIENT_SECRET env var, or a local gitignored file at
+ * ~/.config/kiro-proxy/google-oauth-client.json ({clientId, clientSecret}).
+ * Without either, browser sign-in and refresh are disabled. Forks that ship
+ * their own client can set the env var or drop the local file.
  */
+const LOCAL_CLIENT_CONFIG_PATH = path.join(os.homedir(), '.config', 'kiro-proxy', 'google-oauth-client.json');
+
+function readLocalClientConfig() {
+    try {
+        const raw = fs.readFileSync(LOCAL_CLIENT_CONFIG_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        return { clientId: parsed.clientId || '', clientSecret: parsed.clientSecret || '' };
+    } catch {
+        return { clientId: '', clientSecret: '' };
+    }
+}
+
+const LOCAL_CLIENT = readLocalClientConfig();
+
 export const GOOGLE_OAUTH_CLIENT = {
-    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || '',
-    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || ''
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID || LOCAL_CLIENT.clientId || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || LOCAL_CLIENT.clientSecret || ''
 };
 
 export const GOOGLE_OAUTH = {

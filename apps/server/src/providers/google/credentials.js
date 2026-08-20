@@ -5,8 +5,11 @@
  * between them, which is the whole point of supporting more than one: on a free
  * tier, four accounts is four times the ceiling.
  *
- * Accounts already present on the machine (Antigravity CLI, Gemini CLI) are
- * imported once so an existing setup keeps working without signing in again.
+ * Accounts already present on the machine (Antigravity CLI) are imported once
+ * so an existing setup keeps working without signing in again. Additional
+ * Google accounts are added through the browser sign-in flow
+ * (connections/google-oauth.js), which mints tokens for the same Antigravity
+ * OAuth client and therefore refresh reliably.
  */
 
 import fs from 'fs';
@@ -41,19 +44,6 @@ const LOCAL_SOURCES = [
                 refreshToken: token.refresh_token,
                 // This one serialises RFC 3339 rather than epoch milliseconds.
                 expiresAt: token.expiry ? Date.parse(token.expiry) : null
-            };
-        }
-    },
-    {
-        id: 'gemini-cli',
-        label: 'Gemini CLI',
-        file: () => path.join(os.homedir(), '.gemini', 'oauth_creds.json'),
-        parse: (raw) => {
-            const creds = JSON.parse(raw);
-            return {
-                accessToken: creds.access_token,
-                refreshToken: creds.refresh_token,
-                expiresAt: Number.isFinite(creds.expiry_date) ? creds.expiry_date : null
             };
         }
     }

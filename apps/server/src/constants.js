@@ -6,6 +6,7 @@
 import { homedir, platform, arch } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
+import crypto from 'crypto';
 
 /**
  * Build the list of candidate Kiro CLI database paths for the current platform.
@@ -94,8 +95,9 @@ export const KIRO_DESKTOP_REFRESH_URL_TEMPLATE =
 // IAM Identity Center (AWS SSO OIDC): POST JSON CreateToken with client creds
 export const AWS_SSO_OIDC_URL_TEMPLATE = 'https://oidc.{region}.amazonaws.com/token';
 
-// User-Agent used for refresh requests (mimics the Kiro IDE client).
-export const KIRO_REFRESH_USER_AGENT = 'KiroIDE-0.7.45-kiro-to-claude';
+// User-Agent used for refresh requests (mimics the Kiro IDE client exactly).
+// Must match what the real Kiro IDE sends — no proxy-identifying suffix.
+export const KIRO_REFRESH_USER_AGENT = 'KiroIDE-0.7.45';
 
 // --- OAuth (social login + import) ---
 // Kiro Desktop Auth service (Google/GitHub social login + social refresh).
@@ -207,10 +209,37 @@ export const KIRO_MODEL_MAPPING = {
     'auto': 'auto'
 };
 
-// Kiro-specific headers for AWS CodeWhisperer Streaming Service
+// Kiro-specific headers for AWS CodeWhisperer Streaming Service.
+// These mimic the real Kiro IDE (reverse-engineered via 9router) so upstream
+// cannot distinguish the proxy from a genuine Kiro IDE client. The
+// `kiro-proxy/1.0.0` User-Agent used previously was a dead giveaway.
 export const KIRO_HEADERS = {
-    'User-Agent': 'kiro-proxy/1.0.0',
+    'User-Agent': 'AWS-SDK-JS/3.0.0 kiro-ide/1.0.0',
+    'X-Amz-User-Agent': 'aws-sdk-js/3.0.0 kiro-ide/1.0.0',
     'Content-Type': 'application/json'
+};
+
+// X-Amz-Target value for the GenerateAssistantResponse streaming endpoint.
+// Sent on every CodeWhisperer chat request by the real AWS SDK / Kiro IDE.
+export const KIRO_CODEWHISPERER_TARGET =
+    'AmazonCodeWhispererStreamingService.GenerateAssistantResponse';
+
+// Per-request AWS SDK tracking headers, regenerated for each outbound call so
+// they look like fresh SDK retries rather than a static proxy fingerprint.
+export function buildAmzSdkHeaders(attempt = 1, max = 3) {
+    return {
+        'Amz-Sdk-Request': `attempt=${attempt}; max=${max}`,
+        'Amz-Sdk-Invocation-Id': crypto.randomUUID()
+    };
+}
+
+// Default CodeWhisperer profile ARNs (us-east-1) keyed by auth method, used
+// when an account cannot resolve its own profileArn. Builder ID and social
+// (Google/GitHub) sign-ins map to different shared profiles — mirroring the
+// real Kiro IDE behaviour.
+export const KIRO_DEFAULT_PROFILE_ARNS = {
+    'builder-id': 'arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX',
+    social: 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK'
 };
 
 // AWS service name for signing requests

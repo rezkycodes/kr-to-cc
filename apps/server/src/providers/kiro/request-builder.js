@@ -7,7 +7,10 @@
 import crypto from 'crypto';
 import {
     KIRO_MODEL_MAPPING,
-    KIRO_HEADERS
+    KIRO_HEADERS,
+    KIRO_CODEWHISPERER_TARGET,
+    KIRO_DEFAULT_PROFILE_ARNS,
+    buildAmzSdkHeaders
 } from '../../constants.js';
 
 export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
@@ -243,6 +246,16 @@ function buildKiroHistory(messages, model) {
     });
 }
 
+/** Resolve a shared default CodeWhisperer profileArn by auth method.
+ *  Social (Google/GitHub) sign-ins map to a different shared profile than
+ *  Builder ID, mirroring the real Kiro IDE behaviour. */
+export function resolveDefaultProfileArn(authKey) {
+    if (typeof authKey === 'string' && authKey.includes('social')) {
+        return KIRO_DEFAULT_PROFILE_ARNS.social;
+    }
+    return KIRO_DEFAULT_PROFILE_ARNS['builder-id'];
+}
+
 /** Build the native CodeWhisperer chat request payload. */
 export function buildKiroRequest(anthropicRequest, options = {}) {
     const model = mapModelToKiro(anthropicRequest.model);
@@ -282,20 +295,24 @@ export function buildKiroRequest(anthropicRequest, options = {}) {
             },
             history
         },
-        profileArn: options.profileArn || null,
+        profileArn: options.profileArn || resolveDefaultProfileArn(options.authKey),
         source: 'AI_EDITOR',
         modelId: model,
         origin: 'AI_EDITOR'
     };
 }
 
-/** Build headers for CodeWhisperer API requests. */
-export function buildKiroHeaders(token, region = 'us-east-1', streaming = false) {
+/** Build headers for CodeWhisperer API requests.
+ *  Regenerates the AWS SDK tracking headers per call so each request looks
+ *  like a fresh SDK invocation rather than a static proxy fingerprint. */
+export function buildKiroHeaders(token, region = 'us-east-1', streaming = false, attempt = 1) {
     return {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
         Accept: streaming ? 'application/vnd.amazon.eventstream' : 'application/json',
         'X-Amz-Region': region,
+        'X-Amz-Target': KIRO_CODEWHISPERER_TARGET,
+        ...buildAmzSdkHeaders(attempt),
         ...KIRO_HEADERS
     };
 }

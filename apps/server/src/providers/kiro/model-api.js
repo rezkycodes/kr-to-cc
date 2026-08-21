@@ -157,7 +157,7 @@ export async function testKiroModel(kiroModelId, options = {}) {
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 16
         },
-        { profileArn: authData.profileArn }
+        { profileArn: authData.profileArn, authKey: authData.authKey }
     );
     payload.modelId = kiroModelId;
     if (payload.conversationState?.currentMessage?.userInputMessage) {

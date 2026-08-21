@@ -18,6 +18,8 @@
  */
 
 import { getKiroAuthData } from '../../auth/kiro-token-extractor.js';
+import { KIRO_HEADERS, KIRO_DEFAULT_PROFILE_ARNS, buildAmzSdkHeaders } from '../../constants.js';
+import { resolveDefaultProfileArn } from './request-builder.js';
 import { logger } from '../../utils/logger.js';
 
 const CODEWHISPERER_HOST = 'https://codewhisperer.us-east-1.amazonaws.com';
@@ -75,9 +77,10 @@ export async function getKiroUsageLimits() {
         return { plan: null, quotas: [], resetAt: null, error: 'Not authenticated.' };
     }
 
+    const profileArn = auth.profileArn || resolveDefaultProfileArn(auth.authKey);
     const body = JSON.stringify({
         origin: 'AI_EDITOR',
-        ...(auth.profileArn ? { profileArn: auth.profileArn } : {}),
+        profileArn,
         resourceType: 'AGENTIC_REQUEST'
     });
 
@@ -93,7 +96,9 @@ export async function getKiroUsageLimits() {
                     Authorization: `Bearer ${auth.accessToken}`,
                     'Content-Type': 'application/x-amz-json-1.0',
                     'x-amz-target': TARGET,
-                    Accept: 'application/json'
+                    Accept: 'application/json',
+                    ...KIRO_HEADERS,
+                    ...buildAmzSdkHeaders()
                 },
                 body
             }
@@ -102,14 +107,16 @@ export async function getKiroUsageLimits() {
             name: 'q-rest',
             url: `${Q_HOST}${LIMITS_PATH}?${new URLSearchParams({
                 origin: 'AI_EDITOR',
-                ...(auth.profileArn ? { profileArn: auth.profileArn } : {}),
+                profileArn,
                 resourceType: 'AGENTIC_REQUEST'
             })}`,
             init: {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${auth.accessToken}`,
-                    Accept: 'application/json'
+                    Accept: 'application/json',
+                    ...KIRO_HEADERS,
+                    ...buildAmzSdkHeaders()
                 }
             }
         }

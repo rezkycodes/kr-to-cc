@@ -35,7 +35,7 @@ export async function sendKiroMessage(anthropicRequest) {
     }
 
     const toolNameMap = buildKiroToolNameMap(anthropicRequest.tools);
-    const payload = buildKiroRequest(anthropicRequest, { profileArn: authData.profileArn });
+    const payload = buildKiroRequest(anthropicRequest, { profileArn: authData.profileArn, authKey: authData.authKey });
     const headers = {
         ...buildKiroHeaders(token, region, false),
         'x-amzn-access-model': kiroModel

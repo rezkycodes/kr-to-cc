@@ -62,7 +62,7 @@ function getKiroDbPath() {
 
 // Basic configuration
 export const REQUEST_BODY_LIMIT = process.env.REQUEST_BODY_LIMIT || '10mb';
-export const DEFAULT_PORT = 4000;
+export const DEFAULT_PORT = 4985;
 
 /**
  * Version segment of the Anthropic-compatible API surface.

@@ -73,8 +73,8 @@ array index.
 declares each backend as a provider. Write this gateway into it:
 
 ```bash
-curl -X POST http://localhost:4000/config/pi/apply \
-  -H 'Content-Type: application/json' -d '{"baseUrl":"http://localhost:4000/v1"}'
+curl -X POST http://localhost:4985/config/pi/apply \
+  -H 'Content-Type: application/json' -d '{"baseUrl":"http://localhost:4985/v1"}'
 ```
 
 That merges a `krcc` provider using `"api": "openai-completions"` and leaves every
@@ -143,14 +143,14 @@ npx kiro-to-claude start
 npm start
 ```
 
-The server runs on `http://localhost:4000` by default.
+The server runs on `http://localhost:4985` by default.
 
 ### 2. Sign in to Kiro
 
 Open the sign-in UI in your browser:
 
 ```
-http://localhost:4000/oauth/kiro
+http://localhost:4985/oauth/kiro
 ```
 
 From there you can:
@@ -168,7 +168,7 @@ token fresh automatically (see [Staying signed in](#staying-signed-in)).
 Open the config UI and click **Apply**:
 
 ```
-http://localhost:4000/config/claude
+http://localhost:4985/config/claude
 ```
 
 This writes the right values into `~/.claude/settings.json` for you.
@@ -177,13 +177,13 @@ This writes the right values into `~/.claude/settings.json` for you.
 
 ```bash
 # Health check
-curl http://localhost:4000/health
+curl http://localhost:4985/health
 
 # List available models
-curl http://localhost:4000/v1/models
+curl http://localhost:4985/v1/models
 
 # Probe which models are actually active (makes one tiny request per model)
-curl http://localhost:4000/v1/models/check
+curl http://localhost:4985/v1/models/check
 ```
 
 ---
@@ -192,12 +192,12 @@ curl http://localhost:4000/v1/models/check
 
 ### Easiest: the config UI
 
-Open `http://localhost:4000/config/claude`, pick your models, and click **Apply**.
+Open `http://localhost:4985/config/claude`, pick your models, and click **Apply**.
 The proxy merges the right settings into `~/.claude/settings.json` (preserving your
 other settings and writing a timestamped backup first). Then restart Claude Code.
 
-> **Base URL:** `http://localhost:4000/v1` (what the Configure page writes) or the
-> bare origin `http://localhost:4000`. Claude Code appends its own `/v1/messages`
+> **Base URL:** `http://localhost:4985/v1` (what the Configure page writes) or the
+> bare origin `http://localhost:4985`. Claude Code appends its own `/v1/messages`
 > to this setting, so the first form requests `/v1/v1/messages` and the second
 > requests `/v1/messages`; the proxy mounts its API at both prefixes, so either
 > works. Anything else in the path will be carried into the request and 404.
@@ -216,7 +216,7 @@ Add this configuration:
 {
   "env": {
     "ANTHROPIC_AUTH_TOKEN": "dummy",
-    "ANTHROPIC_BASE_URL": "http://localhost:4000",
+    "ANTHROPIC_BASE_URL": "http://localhost:4985",
     "ANTHROPIC_MODEL": "claude-opus-4-6",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-5",
@@ -233,7 +233,7 @@ Add the proxy settings to your shell profile:
 **macOS / Linux:**
 
 ```bash
-echo 'export ANTHROPIC_BASE_URL="http://localhost:4000"' >> ~/.zshrc
+echo 'export ANTHROPIC_BASE_URL="http://localhost:4985"' >> ~/.zshrc
 echo 'export ANTHROPIC_API_KEY="dummy"' >> ~/.zshrc
 source ~/.zshrc
 ```
@@ -243,7 +243,7 @@ source ~/.zshrc
 **Windows (PowerShell):**
 
 ```powershell
-Add-Content $PROFILE "`n`$env:ANTHROPIC_BASE_URL = 'http://localhost:4000'"
+Add-Content $PROFILE "`n`$env:ANTHROPIC_BASE_URL = 'http://localhost:4985'"
 Add-Content $PROFILE "`$env:ANTHROPIC_API_KEY = 'dummy'"
 . $PROFILE
 ```
@@ -251,7 +251,7 @@ Add-Content $PROFILE "`$env:ANTHROPIC_API_KEY = 'dummy'"
 **Windows (Command Prompt):**
 
 ```cmd
-setx ANTHROPIC_BASE_URL "http://localhost:4000"
+setx ANTHROPIC_BASE_URL "http://localhost:4985"
 setx ANTHROPIC_API_KEY "dummy"
 ```
 
@@ -296,7 +296,7 @@ claude
 ¹ Credit multiplier relative to `auto` (1.0x baseline), per Kiro's docs.
 
 > **Note:** availability depends on your Kiro plan/region. Run
-> `curl http://localhost:4000/v1/models/check` to see which models are actually
+> `curl http://localhost:4985/v1/models/check` to see which models are actually
 > active for your account.
 
 ---
@@ -560,7 +560,7 @@ expiry.
 
 ### Not signed in / "not authenticated"
 
-Open `http://localhost:4000/oauth/kiro` and sign in (or click **Auto-import**), or run
+Open `http://localhost:4985/oauth/kiro` and sign in (or click **Auto-import**), or run
 `kiro auth` in a terminal.
 
 ### "Kiro CLI database not accessible"
@@ -588,7 +588,7 @@ The backend lives in `apps/server/src/` and the Vue 3 + Vite dashboard lives in 
 Nx coordinates both projects and caches build, test, and typecheck work.
 
 ```bash
-# Start Express on :4000 and Vite on :3210 with API proxying
+# Start Express on :4985 and Vite on :3210 with API proxying
 npm run dev
 
 # Production frontend build (dist/apps/web)
@@ -612,7 +612,7 @@ kiro-to-claude start --debug
 
 ### Environment Variables
 
-- `PORT` - Server port (default: `4000`)
+- `PORT` - Server port (default: `4985`)
 - `HOST` - Bind address (default: `127.0.0.1`). Set explicitly only when remote access is intentional.
 - `PROXY_API_KEY` - Optional key required by all `/v1/*` routes. Set Claude Code's `ANTHROPIC_AUTH_TOKEN` to the same value.
 - `ALLOWED_ORIGINS` - Optional comma-separated browser origins in addition to localhost origins.
@@ -631,7 +631,7 @@ Example with optional proxy authentication:
 
 ```bash
 PROXY_API_KEY="replace-with-a-long-random-value" npm start
-export ANTHROPIC_BASE_URL="http://localhost:4000"
+export ANTHROPIC_BASE_URL="http://localhost:4985"
 export ANTHROPIC_AUTH_TOKEN="replace-with-a-long-random-value"
 ```
 

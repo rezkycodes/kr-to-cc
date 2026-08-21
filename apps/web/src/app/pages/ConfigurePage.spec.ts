@@ -8,11 +8,11 @@ const state = {
   error: null,
   current: { baseUrl: 'http://localhost:9999/v1', authToken: 'dummy' },
   models: ['claude-opus-4-8', 'claude-sonnet-4-5'],
-  suggestedBaseUrl: 'http://localhost:4000/v1',
+  suggestedBaseUrl: 'http://localhost:4985/v1',
   pointsHere: false,
   baseUrlIssue: 'Points at http://localhost:9999, not this gateway.',
   defaults: {
-    baseUrl: 'http://localhost:4000/v1',
+    baseUrl: 'http://localhost:4985/v1',
     authToken: 'dummy',
     opusModel: 'claude-opus-4-8',
     sonnetModel: 'claude-sonnet-4-5',
@@ -52,7 +52,7 @@ describe('ConfigurePage', () => {
     await flushPromises();
 
     expect((wrapper.get('#base-url').element as HTMLInputElement).value).toBe(
-      'http://localhost:4000/v1',
+      'http://localhost:4985/v1',
     );
     // The stale value in settings.json is reported, not adopted, and explained.
     expect(wrapper.text()).toContain('http://localhost:9999/v1');
@@ -68,7 +68,7 @@ describe('ConfigurePage', () => {
       '/config/claude/state': () =>
         json({
           ...state,
-          current: { baseUrl: 'http://localhost:4000', authToken: 'dummy' },
+          current: { baseUrl: 'http://localhost:4985', authToken: 'dummy' },
           pointsHere: true,
           baseUrlIssue: null,
         }),
@@ -90,7 +90,7 @@ describe('ConfigurePage', () => {
     await wrapper.get('#opusModel').setValue('claude-opus-5');
     const preview = wrapper.get('pre').text();
 
-    expect(preview).toContain('"ANTHROPIC_BASE_URL": "http://localhost:4000/v1"');
+    expect(preview).toContain('"ANTHROPIC_BASE_URL": "http://localhost:4985/v1"');
     expect(preview).toContain('"ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5"');
     expect(preview).toContain('"CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-4-5"');
 
@@ -114,7 +114,7 @@ describe('ConfigurePage', () => {
 
     const applyCall = fetchMock.mock.calls.find(([url]) => String(url) === '/config/claude/apply');
     expect(applyCall).toBeDefined();
-    expect(JSON.parse(String(applyCall?.[1]?.body)).baseUrl).toBe('http://localhost:4000/v1');
+    expect(JSON.parse(String(applyCall?.[1]?.body)).baseUrl).toBe('http://localhost:4985/v1');
     expect(wrapper.text()).toContain('backup settings.json.2026-07-31.bak');
 
     wrapper.unmount();

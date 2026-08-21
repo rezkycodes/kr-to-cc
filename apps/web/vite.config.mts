@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 
-const backendTarget = process.env.VITE_BACKEND_URL || 'http://127.0.0.1:4000';
+const backendTarget = process.env.VITE_BACKEND_URL || 'http://127.0.0.1:4985';
 const proxiedPrefixes = ['/health', '/oauth', '/config', '/ui', '/v1'];
 
 export default defineConfig({

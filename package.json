@@ -22,7 +22,7 @@
     "start:server": "node apps/server/src/index.js",
     "dev": "nx run-many -t dev --projects=server,web --parallel=2",
     "dev:web": "nx dev web",
-    "dev:server": "PORT=4000 HOST=127.0.0.1 node --watch apps/server/src/index.js",
+    "dev:server": "PORT=4985 HOST=127.0.0.1 node --watch apps/server/src/index.js",
     "test": "nx build web && nx run-many -t test --projects=server,web --parallel=2",
     "test:server": "node --test apps/server/test/*.test.js",
     "typecheck": "nx typecheck web",

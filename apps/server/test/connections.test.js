@@ -238,12 +238,12 @@ test('the store is written owner-only', () => {
 
 test('the authorization URL carries what Google needs for a refresh token', () => {
     resetPending();
-    const { authUrl, state } = startAuthorization('http://127.0.0.1:4000/oauth/google/callback');
+    const { authUrl, state } = startAuthorization('http://127.0.0.1:4985/oauth/google/callback');
     const url = new URL(authUrl);
 
     assert.equal(url.host, 'accounts.google.com');
     assert.equal(url.searchParams.get('response_type'), 'code');
-    assert.equal(url.searchParams.get('redirect_uri'), 'http://127.0.0.1:4000/oauth/google/callback');
+    assert.equal(url.searchParams.get('redirect_uri'), 'http://127.0.0.1:4985/oauth/google/callback');
     // Both are required: without them a repeat authorisation returns no refresh
     // token, and the account dies an hour later.
     assert.equal(url.searchParams.get('access_type'), 'offline');
@@ -255,7 +255,7 @@ test('the authorization URL carries what Google needs for a refresh token', () =
 
 test('a pasted callback URL is parsed, and bad input is explained', () => {
     // A full URL is what a user copies from the address bar.
-    const full = parseCallback('http://127.0.0.1:4000/oauth/google/callback?code=abc123&state=xyz');
+    const full = parseCallback('http://127.0.0.1:4985/oauth/google/callback?code=abc123&state=xyz');
     assert.equal(full.code, 'abc123');
     assert.equal(full.state, 'xyz');
 
@@ -272,7 +272,7 @@ test('a pasted callback URL is parsed, and bad input is explained', () => {
 test('pending sign-ins are capped so abandoned flows cannot grow the map', () => {
     resetPending();
     for (let i = 0; i < 30; i += 1) {
-        startAuthorization(`http://127.0.0.1:4000/oauth/google/callback?i=${i}`);
+        startAuthorization(`http://127.0.0.1:4985/oauth/google/callback?i=${i}`);
     }
     assert.ok(pendingCount() <= 16, `expected at most 16 pending, got ${pendingCount()}`);
 });

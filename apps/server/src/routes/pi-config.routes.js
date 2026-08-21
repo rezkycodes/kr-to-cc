@@ -26,7 +26,7 @@ const router = express.Router();
 
 /** The origin a client on this machine should use to reach the gateway. */
 function suggestedBaseUrl(req) {
-    const host = req.get('host') || `localhost:${process.env.PORT || 4000}`;
+    const host = req.get('host') || `localhost:${process.env.PORT || DEFAULT_PORT}`;
     const protocol = req.protocol || 'http';
     return `${protocol}://${host}${API_VERSION}`;
 }

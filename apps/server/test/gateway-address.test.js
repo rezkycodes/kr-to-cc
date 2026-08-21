@@ -17,11 +17,11 @@ function fakeRequest({ host = 'localhost:3210', boundPort, protocol = 'http', he
 }
 
 test('uses the Express listen port, not the proxying dev server port', () => {
-    // Vite serves the UI on 3210 and forwards /config to Express on 4000, so the
+    // Vite serves the UI on 3210 and forwards /config to Express on 4985, so the
     // Host header must never decide what Claude Code dials.
-    const req = fakeRequest({ host: 'localhost:3210', boundPort: 4000 });
-    assert.equal(gatewayPort(req), 4000);
-    assert.equal(gatewayOrigin(req), 'http://localhost:4000');
+    const req = fakeRequest({ host: 'localhost:3210', boundPort: 4985 });
+    assert.equal(gatewayPort(req), 4985);
+    assert.equal(gatewayOrigin(req), 'http://localhost:4985');
 });
 
 test('falls back to PORT then the default when no port was recorded', () => {
@@ -52,18 +52,18 @@ test('keeps the caller hostname and honours forwarded protocol', () => {
 });
 
 test('brackets bare IPv6 hosts so the port stays parseable', () => {
-    assert.equal(gatewayOrigin(fakeRequest({ host: '[::1]:3210', boundPort: 4000 })), 'http://[::1]:4000');
+    assert.equal(gatewayOrigin(fakeRequest({ host: '[::1]:3210', boundPort: 4985 })), 'http://[::1]:4985');
 });
 
 test('both the origin and the origin plus /v1 are valid base URLs', () => {
     // The API is mounted at /v1 and /v1/v1, so either spelling of the setting
     // reaches a handler once Claude Code appends its own /v1/messages.
-    const req = fakeRequest({ host: 'localhost:4000', boundPort: 4000 });
+    const req = fakeRequest({ host: 'localhost:4985', boundPort: 4985 });
     for (const value of [
-        'http://localhost:4000',
-        'http://localhost:4000/',
-        'http://localhost:4000/v1',
-        'http://localhost:4000/v1/'
+        'http://localhost:4985',
+        'http://localhost:4985/',
+        'http://localhost:4985/v1',
+        'http://localhost:4985/v1/'
     ]) {
         assert.equal(pointsAtGateway(req, value), true, `expected ${value} to be accepted`);
         assert.equal(baseUrlIssue(req, value), null);
@@ -71,27 +71,27 @@ test('both the origin and the origin plus /v1 are valid base URLs', () => {
 });
 
 test('any other path is rejected with an actionable reason', () => {
-    const req = fakeRequest({ host: 'localhost:4000', boundPort: 4000 });
-    assert.equal(pointsAtGateway(req, 'http://localhost:4000/v2'), false);
-    assert.match(baseUrlIssue(req, 'http://localhost:4000/v2'), /remove the "\/v2" path/i);
-    assert.match(baseUrlIssue(req, 'http://localhost:4000/v1/messages'), /remove the/i);
+    const req = fakeRequest({ host: 'localhost:4985', boundPort: 4985 });
+    assert.equal(pointsAtGateway(req, 'http://localhost:4985/v2'), false);
+    assert.match(baseUrlIssue(req, 'http://localhost:4985/v2'), /remove the "\/v2" path/i);
+    assert.match(baseUrlIssue(req, 'http://localhost:4985/v1/messages'), /remove the/i);
 });
 
 test('loopback aliases are the same host', () => {
-    const req = fakeRequest({ host: '127.0.0.1:4000', boundPort: 4000 });
-    assert.equal(pointsAtGateway(req, 'http://localhost:4000/v1'), true);
-    assert.equal(pointsAtGateway(req, 'http://[::1]:4000'), true);
+    const req = fakeRequest({ host: '127.0.0.1:4985', boundPort: 4985 });
+    assert.equal(pointsAtGateway(req, 'http://localhost:4985/v1'), true);
+    assert.equal(pointsAtGateway(req, 'http://[::1]:4985'), true);
 });
 
 test('a different port or host is reported as pointing elsewhere', () => {
-    const req = fakeRequest({ host: 'localhost:4000', boundPort: 4000 });
+    const req = fakeRequest({ host: 'localhost:4985', boundPort: 4985 });
     assert.equal(pointsAtGateway(req, 'http://localhost:9999/v1'), false);
     assert.match(baseUrlIssue(req, 'http://localhost:9999/v1'), /not this gateway/);
     assert.match(baseUrlIssue(req, 'https://api.anthropic.com'), /not this gateway/);
 });
 
 test('an unset or unparseable base URL is never a match', () => {
-    const req = fakeRequest({ host: 'localhost:4000', boundPort: 4000 });
+    const req = fakeRequest({ host: 'localhost:4985', boundPort: 4985 });
     for (const value of [undefined, null, '', '   ']) {
         assert.equal(pointsAtGateway(req, value), false);
         assert.match(baseUrlIssue(req, value), /not set/);

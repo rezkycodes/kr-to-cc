@@ -110,7 +110,7 @@ onUnmounted(() => {
           <Input
             id="callback-url"
             v-model="pasted"
-            placeholder="http://127.0.0.1:4000/oauth/google/callback?code=…"
+            placeholder="http://127.0.0.1:4985/oauth/google/callback?code=…"
             class="font-mono text-[11px]"
             autocomplete="off"
             spellcheck="false"

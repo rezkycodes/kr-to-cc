@@ -130,7 +130,7 @@ const BODY = /* html */ `
       <section class="editor-section">
         <div class="editor-section-head"><h3>Connection</h3><span>Required</span></div>
         <div class="endpoint-grid">
-          <div><label class="lbl" for="baseUrl">Anthropic base URL</label><input id="baseUrl" placeholder="http://localhost:4000/v1" /><small class="hint">Claude Code sends Messages API requests to this endpoint.</small></div>
+          <div><label class="lbl" for="baseUrl">Anthropic base URL</label><input id="baseUrl" placeholder="http://localhost:4985/v1" /><small class="hint">Claude Code sends Messages API requests to this endpoint.</small></div>
           <div><label class="lbl" for="authToken">Proxy API key</label><input id="authToken" type="password" autocomplete="off" placeholder="dummy" /><small class="hint">Use the configured proxy key, or dummy for local unsecured mode.</small></div>
         </div>
         <div class="current-route"><span class="current" id="current">Reading current route…</span></div>

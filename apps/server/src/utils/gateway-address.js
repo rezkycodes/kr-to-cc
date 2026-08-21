@@ -2,7 +2,7 @@
  * Gateway address helpers.
  *
  * The UI is served from Express in production, but during development Vite
- * serves it on 3210 and proxies /config, /health, /v1 … to Express on 4000.
+ * serves it on 3210 and proxies /config, /health, /v1 … to Express on 4985.
  * That means the browser's Host header is the *dev server*, not the gateway,
  * so anything Claude Code has to dial must be built from Express' own port.
  */

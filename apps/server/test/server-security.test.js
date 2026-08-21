@@ -48,9 +48,9 @@ test('protects /v1 with an optional proxy API key', async () => {
 test('allows local browser origins and same-origin dashboard frames only', async () => {
     await withServer(async (baseUrl) => {
         const local = await fetch(`${baseUrl}/`, {
-            headers: { Origin: 'http://localhost:4000' }
+            headers: { Origin: 'http://localhost:4985' }
         });
-        assert.equal(local.headers.get('access-control-allow-origin'), 'http://localhost:4000');
+        assert.equal(local.headers.get('access-control-allow-origin'), 'http://localhost:4985');
         assert.equal(local.headers.get('x-content-type-options'), 'nosniff');
         assert.equal(local.headers.get('x-frame-options'), 'SAMEORIGIN');
         assert.equal(local.headers.get('referrer-policy'), 'no-referrer');

@@ -29,7 +29,7 @@ function isolate(contents) {
     return file;
 }
 
-const OPTIONS = { baseUrl: 'http://localhost:4000/v1', apiKey: 'dummy' };
+const OPTIONS = { baseUrl: 'http://localhost:4985/v1', apiKey: 'dummy' };
 
 test('the provider block declares the OpenAI transport', async () => {
     isolate();
@@ -38,7 +38,7 @@ test('the provider block declares the OpenAI transport', async () => {
     // Pi Agent would not understand the Anthropic route, so this must be the
     // OpenAI one or nothing works.
     assert.equal(provider.api, 'openai-completions');
-    assert.equal(provider.baseUrl, 'http://localhost:4000/v1');
+    assert.equal(provider.baseUrl, 'http://localhost:4985/v1');
     assert.ok(provider.models.length > 0);
 
     for (const model of provider.models) {

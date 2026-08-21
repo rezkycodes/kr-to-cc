@@ -33,7 +33,7 @@ export function validateMessagesRequest(body) {
     }
     if (body.tools !== undefined) {
         if (!Array.isArray(body.tools)) return 'tools must be an array';
-        if (body.tools.length > 128) return 'tools may contain at most 128 entries';
+        if (body.tools.length > 1024) return 'tools may contain at most 1024 entries';
         for (const tool of body.tools) {
             if (!tool || typeof tool.name !== 'string'
                 || !tool.name.trim() || tool.name.length > 256) {

@@ -119,13 +119,13 @@ test('rejects non-array tools', () => {
     assert.match(err, /tools/);
 });
 
-test('rejects tools array over 128 entries', () => {
-    const tools = Array.from({ length: 129 }, (_, i) => ({
+test('rejects tools array over 1024 entries', () => {
+    const tools = Array.from({ length: 1025 }, (_, i) => ({
         name: `tool_${i}`,
         input_schema: { type: 'object' }
     }));
     const err = validateMessagesRequest({ messages: [{ role: 'user', content: 'x' }], tools });
-    assert.match(err, /128/);
+    assert.match(err, /1024/);
 });
 
 test('rejects tool with missing name', () => {

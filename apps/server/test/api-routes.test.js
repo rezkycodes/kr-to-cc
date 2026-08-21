@@ -36,11 +36,11 @@ test('rejects invalid max_tokens and excessive tools', () => {
 
     assert.match(validateMessagesRequest({
         messages: [{ role: 'user', content: 'hi' }],
-        tools: Array.from({ length: 129 }, (_, index) => ({
+        tools: Array.from({ length: 1025 }, (_, index) => ({
             name: `tool_${index}`,
             input_schema: { type: 'object' }
         }))
-    }), /at most 128/);
+    }), /at most 1024/);
 });
 
 test('bounds model check concurrency, timeout, and candidate count', () => {

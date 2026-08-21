@@ -59,6 +59,7 @@
     "better-sqlite3": "^12.5.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "node-forge": "^1.4.0",
     "vue": "3.5.40"
   },
   "devDependencies": {

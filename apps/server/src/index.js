@@ -10,6 +10,7 @@ import { logger } from './utils/logger.js';
 // Parse command line arguments
 const args = process.argv.slice(2);
 const isDebug = args.includes('--debug') || process.env.DEBUG === 'true';
+const isMitm = args.includes('--mitm');
 
 // Initialize logger
 logger.setDebug(isDebug);
@@ -17,6 +18,13 @@ logger.setDebug(isDebug);
 if (isDebug) {
     logger.debug('Debug mode enabled');
 }
+
+// MITM mode: start transparent HTTPS proxy instead of Express server
+if (isMitm) {
+    await import('./mitm/server.js');
+    // mitm/server.js is self-contained — it starts its own HTTPS server
+    // and manages DNS entries. The Express app below is not started.
+} else {
 
 const PORT = process.env.PORT || DEFAULT_PORT;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -107,3 +115,4 @@ app.listen(PORT, HOST, () => {
         logger.warn('Running in DEBUG mode - verbose logs enabled');
     }
 });
+} // end else (Express mode)
